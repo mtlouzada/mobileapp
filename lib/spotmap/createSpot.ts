@@ -31,7 +31,10 @@ const SPOT_TAG = "skatespot";
 
 function generateSpotPermlink(): string {
   const ts = new Date().toISOString().replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-  return `skatespot-${ts.substring(0, 15)}`;
+  // Append a short random suffix so two spots created in the same second by the
+  // same account don't collide on the permlink (Hive rejects duplicates).
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `skatespot-${ts.substring(0, 15)}-${rand}`;
 }
 
 /**
@@ -69,16 +72,20 @@ export async function submitSpot(input: SubmitSpotInput): Promise<SubmitSpotResu
   const { username, privateKey } = input;
 
   // Post under the latest snaps container so the spotmap sync's
-  // parent_permlink filter matches (same as the web composer).
-  let parentAuthor = "";
-  let parentPermlink = COMMUNITY_TAG;
+  // parent_permlink filter matches (same as the web composer). If the container
+  // lookup fails we must abort: a top-level post (parent_author="") would carry
+  // the tag but NOT match the sync's parent_permlink filter, so it would never
+  // be ingested — and the caller would falsely report success.
+  let parentAuthor: string;
+  let parentPermlink: string;
   try {
     const container = await getLastSnapsContainer();
     parentAuthor = container.author;
     parentPermlink = container.permlink;
-  } catch {
-    // Fall back to a community-tagged top-level post if the container lookup
-    // fails — the spot still carries the skatespot tag and syncs eventually.
+  } catch (err) {
+    throw new Error(
+      "Couldn't reach Hive to post the spot. Check your connection and try again."
+    );
   }
 
   const permlink = generateSpotPermlink();

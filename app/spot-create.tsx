@@ -75,15 +75,26 @@ export default function SpotCreateScreen() {
           if (!cancelled) setLocating(false);
           return;
         }
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        // Cap the GPS wait at 10s so a poor/indoor fix can't hang the screen on
+        // "Finding your location…". On timeout, fall back to the last known fix,
+        // and failing that, let the user place the pin manually on the map.
+        const fresh = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<Location.LocationObject | null>((resolve) =>
+            setTimeout(() => resolve(null), 10000)
+          ),
+        ]);
         if (cancelled) return;
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setCoords({ lat, lng });
-        setRegion({ latitude: lat, longitude: lng, latitudeDelta: 0.005, longitudeDelta: 0.005 });
-        reverseGeocode(lat, lng);
+        const pos = fresh ?? (await Location.getLastKnownPositionAsync());
+        if (cancelled) return;
+        if (pos) {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setCoords({ lat, lng });
+          setRegion({ latitude: lat, longitude: lng, latitudeDelta: 0.005, longitudeDelta: 0.005 });
+          reverseGeocode(lat, lng);
+        }
+        // else: no fix available — the map drops to its draggable default below.
       } catch {
         // Leave the map at a draggable default; user can place the pin manually.
       } finally {
@@ -220,8 +231,13 @@ export default function SpotCreateScreen() {
         hive_permlink: permlink,
         hive_created: new Date().toISOString(),
       };
+      // Dedup on (hive_author, hive_permlink) — the canonical row arrives with a
+      // Supabase uuid `id`, not our fabricated `author/permlink`, so filtering by
+      // `id` would never remove this optimistic copy and the pin would double up.
       queryClient.setQueryData<SpotmapRow[]>(["spotmap", "all"], (old) =>
-        old ? [optimistic, ...old.filter((s) => s.id !== optimistic.id)] : [optimistic]
+        old
+          ? [optimistic, ...old.filter((s) => !(s.hive_author === author && s.hive_permlink === permlink))]
+          : [optimistic]
       );
 
       // Targeted server ingestion so it appears for everyone within seconds,
@@ -253,8 +269,13 @@ export default function SpotCreateScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={styles.headerBtn}>
-          <Ionicons name="close" size={26} color={theme.colors.text} />
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.headerBtn}
+          disabled={submitting}
+        >
+          <Ionicons name="close" size={26} color={submitting ? theme.colors.muted : theme.colors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Add Spot</Text>
         <View style={styles.headerBtn} />
@@ -263,11 +284,19 @@ export default function SpotCreateScreen() {
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {/* Media */}
         <View style={styles.mediaRow}>
-          <Pressable style={styles.mediaBtn} onPress={addFromCamera}>
+          <Pressable
+            style={[styles.mediaBtn, submitting && styles.controlDisabled]}
+            onPress={addFromCamera}
+            disabled={submitting}
+          >
             <Ionicons name="camera-outline" size={22} color={theme.colors.primary} />
             <Text style={styles.mediaBtnText}>Camera</Text>
           </Pressable>
-          <Pressable style={styles.mediaBtn} onPress={addFromLibrary}>
+          <Pressable
+            style={[styles.mediaBtn, submitting && styles.controlDisabled]}
+            onPress={addFromLibrary}
+            disabled={submitting}
+          >
             <Ionicons name="images-outline" size={22} color={theme.colors.primary} />
             <Text style={styles.mediaBtnText}>Library</Text>
           </Pressable>
@@ -283,7 +312,11 @@ export default function SpotCreateScreen() {
                     <Ionicons name="play" size={12} color="#fff" />
                   </View>
                 )}
-                <Pressable style={styles.thumbRemove} onPress={() => removeMedia(m.uri)}>
+                <Pressable
+                  style={styles.thumbRemove}
+                  onPress={() => removeMedia(m.uri)}
+                  disabled={submitting}
+                >
                   <Ionicons name="close-circle" size={20} color={theme.colors.danger} />
                 </Pressable>
               </View>
@@ -404,6 +437,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.secondaryCard,
   },
   mediaBtnText: { color: theme.colors.text, fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.md },
+  controlDisabled: { opacity: 0.4 },
   thumbStrip: { flexGrow: 0 },
   thumbWrap: { marginRight: theme.spacing.sm },
   thumb: { width: 84, height: 84, borderRadius: theme.borderRadius.sm, backgroundColor: theme.colors.secondaryCard },
