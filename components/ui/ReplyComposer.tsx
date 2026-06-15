@@ -233,7 +233,7 @@ export function ReplyComposer({
         body_length: replyBody.length,
         reblogged_by: [],
         blacklists: [],
-      } as Discussion;
+      } as unknown as Discussion;
 
       // Call success callback
       if (onReplySuccess) {

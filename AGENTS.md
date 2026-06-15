@@ -113,9 +113,13 @@ QueryClientProvider
 
 1. **Version drift:** app.json, Info.plist, project.pbxproj, and package.json all have independent version numbers that must be synced manually before builds.
 
-2. **Android versionCode:** Historically stuck at 1 — must be incremented for Play Store releases.
+2. **Android versionCode:** Must be incremented in `app.json` before each Play Store
+   release (`eas.json` uses `appVersionSource: "local"`, so it is never auto-bumped).
 
-3. **newArchEnabled mismatch:** `app.json` says `false`, `ios/Podfile.properties.json` says `true`. Pick one and sync.
+3. **newArchEnabled:** `app.json` and `ios/Podfile.properties.json` are both `true`
+   (New Arch is required by Expo 54 / RN 0.81 / reanimated 4). `app.json` is the
+   source of truth — `ios/` is regenerated from it by prebuild, so do not edit the
+   Podfile value directly.
 
 4. **Test account in auth-provider:** Hardcoded credentials in `lib/auth-provider.tsx`
    let Apple reviewers log in with a simple password instead of a HIVE posting key.

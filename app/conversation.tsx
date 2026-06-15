@@ -17,6 +17,7 @@ import { useReplies } from '~/lib/hooks/useReplies';
 import { useAuth } from '~/lib/auth-provider';
 import { theme } from '~/lib/theme';
 import type { Discussion } from '@hiveio/dhive';
+import type { NestedDiscussion } from '~/lib/types';
 
 export default function ConversationScreen() {
   const { author, permlink, postData } = useLocalSearchParams<{
@@ -125,8 +126,8 @@ export default function ConversationScreen() {
                 {/* Render all replies using ConversationReply for better threading */}
                 {allReplies.map((reply, index) => (
                   <View key={`${reply.author}/${reply.permlink}-${index}`} style={styles.replyContainer}>
-                    <ConversationReply 
-                      post={reply} 
+                    <ConversationReply
+                      post={reply as NestedDiscussion}
                       currentUsername={username}
                       depth={reply.depth || 0}
                       maxDepth={3}
