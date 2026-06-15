@@ -21,7 +21,9 @@ import {
   decryptKey,
   generateSalt,
   deriveKeyFromPin,
-  authenticateBiometric
+  authenticateBiometric,
+  CURRENT_KDF,
+  LEGACY_KDF
 } from './secure-key';
 import {
   getUserRelationshipList,
@@ -309,7 +311,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Small delay to allow UI to update with loading state before expensive operation
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        const secret = deriveKeyFromPin(pin, salt);
+        const secret = deriveKeyFromPin(pin, salt, CURRENT_KDF);
         encrypted = encryptKey(postingKey, secret, iv);
       } else if (method === 'biometric') {
         const ok = await authenticateBiometric();
@@ -331,6 +333,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         salt,
         iv,
         createdAt: Date.now(),
+        // Record the KDF for PIN keys so future param changes stay decryptable.
+        ...(method === 'pin' ? { kdf: CURRENT_KDF } : {}),
       };
       
       await storeEncryptedKey(normalizedUsername, encryptedKey);
@@ -373,9 +377,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         // Small delay to allow UI to update with loading state before expensive operation
         await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const secret = deriveKeyFromPin(pin, encryptedKey.salt);
+
+        // Derive with the params this key was stored under (legacy keys have no
+        // `kdf` field), so older keys keep unlocking after we raised the defaults.
+        const kdf = encryptedKey.kdf ?? LEGACY_KDF;
+        const secret = deriveKeyFromPin(pin, encryptedKey.salt, kdf);
         decryptedKey = decryptKey(encryptedKey.encrypted, secret, encryptedKey.iv);
+
+        // Lazy upgrade: transparently re-encrypt legacy keys with the stronger
+        // current params now that we hold the PIN and the plaintext.
+        if (decryptedKey && !encryptedKey.kdf) {
+          try {
+            const newSecret = deriveKeyFromPin(pin, encryptedKey.salt, CURRENT_KDF);
+            const reEncrypted = encryptKey(decryptedKey, newSecret, encryptedKey.iv);
+            await storeEncryptedKey(selectedUsername, {
+              ...encryptedKey,
+              encrypted: reEncrypted,
+              kdf: CURRENT_KDF,
+            });
+          } catch {
+            // Non-fatal — keep the legacy blob; the user stays logged in.
+          }
+        }
       } else if (encryptedKey.method === 'biometric') {
         try {
           const ok = await authenticateBiometric();

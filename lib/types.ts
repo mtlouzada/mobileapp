@@ -90,6 +90,8 @@ export interface EncryptedKey {
   salt: string;
   iv: string;
   createdAt: number;
+  /** KDF params used for this key (PIN method). Absent ⇒ legacy params. */
+  kdf?: { iterations: number; hasher: 'SHA1' | 'SHA256' };
 }
 
 export interface StoredUser {
