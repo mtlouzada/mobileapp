@@ -1,10 +1,15 @@
 // REST client for the public Skatehive spot-map endpoints.
-// These live on the web app origin (skatehive.app), NOT api.skatehive.app.
-// All endpoints are public / no auth and edge-cached ~5 min.
+// READS are served from api.skatehive.app so the app doesn't depend on the
+// website's Vercel firewall (Attack Challenge Mode on skatehive.app serves a JS
+// challenge that the app's plain fetch can't pass). The WRITE/ingest path
+// (sync-one) still lives on the web app origin, where the Hive-RPC ingest +
+// Supabase upsert run; it's best-effort and the daily reconciliation backfills
+// it if unreachable. All endpoints are public / no auth and edge-cached ~5 min.
 
 import type { SpotmapRow } from "./types";
 
-const SPOTMAP_BASE = "https://skatehive.app/api/spotmap";
+const SPOTMAP_BASE = "https://api.skatehive.app/api/spotmap";
+const SPOTMAP_SYNC_BASE = "https://skatehive.app/api/spotmap";
 
 interface SpotListResponse {
   success: boolean;
@@ -73,7 +78,7 @@ export async function fetchSpotById(
  */
 export async function syncOneSpot(author: string, permlink: string): Promise<boolean> {
   try {
-    const res = await fetch(`${SPOTMAP_BASE}/sync-one`, {
+    const res = await fetch(`${SPOTMAP_SYNC_BASE}/sync-one`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ author, permlink }),
