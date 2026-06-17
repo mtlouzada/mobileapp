@@ -16,12 +16,13 @@ interface NotificationProviderProps {
 }
 
 export function NotificationProvider({ children }: NotificationProviderProps) {
-  const { username } = useAuth();
+  const { username, session } = useAuth();
   const [badgeCount, setBadgeCount] = useState(0);
   const markedAsReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateBadgeCount = useCallback(async () => {
-    if (!username || username === 'SPECTATOR') {
+    // Email (userbase) accounts may have no on-chain Hive account yet → skip.
+    if (!username || username === 'SPECTATOR' || session?.kind === 'userbase') {
       setBadgeCount(0);
       return;
     }
@@ -33,7 +34,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       console.error('Error fetching notification badge count:', error);
       // Don't reset count on error to avoid flickering
     }
-  }, [username]);
+  }, [username, session?.kind]);
 
   const clearBadge = useCallback(() => {
     setBadgeCount(0);

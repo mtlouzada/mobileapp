@@ -102,6 +102,10 @@ export interface AuthSession {
   username: string;
   decryptedKey: string;
   loginTime: number;
+  /** 'userbase' = server-custody email account (no local key; server signs). */
+  kind?: 'hive' | 'userbase';
+  /** Bearer token for userbase sessions. */
+  userbaseToken?: string;
 }
 
 // --- Discussion Types (Extended from @hiveio/dhive) ---

@@ -9,7 +9,7 @@ import {
   Alert,
   Image,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -19,7 +19,8 @@ import { Text } from "~/components/ui/text";
 import { useAuth } from "~/lib/auth-provider";
 import { useToast } from "~/lib/toast-provider";
 import { theme } from "~/lib/theme";
-import { uploadImageToHive, createImageMarkdown } from "~/lib/upload/image-upload";
+import { uploadImageToHive, uploadImageViaUserbase, createImageMarkdown } from "~/lib/upload/image-upload";
+import { canPost, isUserbaseSession } from "~/lib/posting";
 import { uploadVideoToWorker, createVideoIframe } from "~/lib/upload/video-upload";
 import { submitSpot } from "~/lib/spotmap/createSpot";
 import { syncOneSpot } from "~/lib/spotmap/api";
@@ -53,6 +54,9 @@ export default function SpotCreateScreen() {
   const { username, session } = useAuth();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  // ?camera=1 (from the Home Screen "Add Spot" widget) auto-opens the camera.
+  const params = useLocalSearchParams<{ camera?: string }>();
+  const cameraAutoOpenedRef = useRef(false);
 
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [name, setName] = useState("");
@@ -160,12 +164,20 @@ export default function SpotCreateScreen() {
     }
   };
 
+  // Auto-open the camera when launched from the Add Spot widget. Fires once.
+  useEffect(() => {
+    if (params.camera === "1" && !cameraAutoOpenedRef.current) {
+      cameraAutoOpenedRef.current = true;
+      addFromCamera();
+    }
+  }, [params.camera]);
+
   const removeMedia = (uri: string) => setMedia((prev) => prev.filter((m) => m.uri !== uri));
 
   const canSubmit = !submitting && name.trim().length > 0 && !!coords;
 
   const handleSubmit = async () => {
-    if (!username || !session?.decryptedKey) {
+    if (!username || !canPost(session)) {
       Alert.alert("Login required", "You need to be logged in to add a spot.");
       return;
     }
@@ -188,10 +200,12 @@ export default function SpotCreateScreen() {
         const fileName = m.uri.split("/").pop() || `spot-${i}`;
         if (m.type === "image") {
           setProgress(`Uploading photo ${i + 1}/${media.length}…`);
-          const res = await uploadImageToHive(m.uri, fileName, m.mimeType, {
-            username,
-            privateKey: session.decryptedKey,
-          });
+          const res = isUserbaseSession(session)
+            ? await uploadImageViaUserbase(m.uri, fileName, m.mimeType, session!.userbaseToken!)
+            : await uploadImageToHive(m.uri, fileName, m.mimeType, {
+                username,
+                privateKey: session!.decryptedKey,
+              });
           imageUrls.push(createImageMarkdown(res.url, "spot"));
         } else {
           setProgress(`Uploading video ${i + 1}/${media.length}…`);
@@ -204,9 +218,7 @@ export default function SpotCreateScreen() {
       }
 
       setProgress("Posting spot to Hive…");
-      const { author, permlink } = await submitSpot({
-        username,
-        privateKey: session.decryptedKey,
+      const { author, permlink } = await submitSpot(session!, {
         name: name.trim(),
         lat: coords.lat,
         lng: coords.lng,

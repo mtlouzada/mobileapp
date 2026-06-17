@@ -17,8 +17,9 @@ import { VideoPlayer } from '../Feed/VideoPlayer';
 import { useAuth } from '~/lib/auth-provider';
 import { useToast } from '~/lib/toast-provider';
 import { createHiveComment } from '~/lib/upload/post-utils';
+import { canPost, isUserbaseSession, postComment } from '~/lib/posting';
 import { uploadVideoToWorker, createVideoIframe } from '~/lib/upload/video-upload';
-import { uploadImageToHive, createImageMarkdown } from '~/lib/upload/image-upload';
+import { uploadImageToHive, uploadImageViaUserbase, createImageMarkdown } from '~/lib/upload/image-upload';
 import { theme } from '~/lib/theme';
 import type { Discussion } from '@hiveio/dhive';
 
@@ -109,7 +110,7 @@ export function ReplyComposer({
       return;
     }
 
-    if (!username || username === "SPECTATOR" || !session?.decryptedKey) {
+    if (!username || !canPost(session)) {
       Alert.alert("Authentication Required", "Please log in to reply");
       return;
     }
@@ -130,16 +131,13 @@ export function ReplyComposer({
           setUploadProgress("Uploading image...");
           
           try {
-            const imageResult = await uploadImageToHive(
-              media,
-              fileName,
-              mediaMimeType,
-              {
-                username,
-                privateKey: session.decryptedKey,
-              }
-            );
-            
+            const imageResult = isUserbaseSession(session)
+              ? await uploadImageViaUserbase(media, fileName, mediaMimeType, session!.userbaseToken!)
+              : await uploadImageToHive(media, fileName, mediaMimeType, {
+                  username,
+                  privateKey: session!.decryptedKey,
+                });
+
             imageUrls.push(imageResult.url);
             const imageMarkdown = createImageMarkdown(imageResult.url, "Uploaded image");
             replyBody += replyBody ? `\n\n${imageMarkdown}` : imageMarkdown;
@@ -175,16 +173,20 @@ export function ReplyComposer({
 
       setUploadProgress("Posting reply...");
 
-      // Post reply to blockchain
-      await createHiveComment(
-        replyBody,
-        parentAuthor,
-        parentPermlink,
-        {
-          username,
-          privateKey: session.decryptedKey,
-        }
-      );
+      // Post reply — server-signed for email accounts, local key otherwise.
+      if (isUserbaseSession(session)) {
+        await postComment(session!, { parentAuthor, parentPermlink, body: replyBody });
+      } else {
+        await createHiveComment(
+          replyBody,
+          parentAuthor,
+          parentPermlink,
+          {
+            username,
+            privateKey: session!.decryptedKey,
+          }
+        );
+      }
 
       // Create optimistic reply object - simplified to avoid type conflicts
       const newReply = {

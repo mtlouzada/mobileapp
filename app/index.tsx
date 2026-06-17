@@ -10,6 +10,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Text,
   UIManager,
   View,
   StyleSheet,
@@ -233,6 +234,13 @@ export default function Index() {
               deletingUser={deletingUser}
             />
           </View>
+
+          <Pressable
+            onPress={() => router.push("/email-login")}
+            style={styles.emailLoginButton}
+          >
+            <Text style={styles.emailLoginText}>Sign in with email (beta)</Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -240,6 +248,18 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
+  emailLoginButton: {
+    alignSelf: "center",
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  emailLoginText: {
+    color: theme.colors.primary,
+    fontFamily: theme.fonts.bold,
+    fontSize: theme.fontSizes.md,
+    textDecorationLine: "underline",
+  },
   videoContainer: {
     position: "absolute",
     top: 0,

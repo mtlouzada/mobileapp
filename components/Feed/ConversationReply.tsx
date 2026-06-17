@@ -11,12 +11,13 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { Text } from '../ui/text';
 import { HIVE_AVATAR_URL } from '~/lib/constants';
+import { useSoftPostOverlay } from '~/lib/userbase/soft-post-context';
 import { EnhancedMarkdownRenderer } from '../markdown/EnhancedMarkdownRenderer';
 import { MediaPreview } from './MediaPreview';
 import { ReplyComposer } from '../ui/ReplyComposer';
 import { useAuth } from '~/lib/auth-provider';
 import { useToast } from '~/lib/toast-provider';
-import { vote as hiveVote } from '~/lib/hive-utils';
+import { castVote, canPost } from '~/lib/posting';
 import { theme } from '~/lib/theme';
 import { extractMediaFromBody } from '~/lib/utils';
 import type { Discussion } from '@hiveio/dhive';
@@ -60,6 +61,10 @@ export function ConversationReply({
   maxDepth = 3,
   onReplySuccess
 }: ConversationReplyProps) {
+  // Mask the shared @skateuser account with the real (email/lite) author.
+  const softOverlay = useSoftPostOverlay(post.author, post.permlink);
+  const displayAuthor = softOverlay?.handle || post.author;
+  const displayAvatar = softOverlay?.avatar_url || `${HIVE_AVATAR_URL}/${post.author}/avatar/small`;
   const { session } = useAuth();
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<Media | null>(null);
@@ -82,12 +87,7 @@ export function ConversationReply({
     try {
       setIsVoting(true);
 
-      if (!session || !session.username || !session.decryptedKey) {
-        showToast('Please login first', 'error');
-        return;
-      }
-
-      if (session.username === "SPECTATOR") {
+      if (!canPost(session)) {
         showToast('Please login first', 'error');
         return;
       }
@@ -99,9 +99,8 @@ export function ConversationReply({
       setVoteCount(prevCount => previousLikedState ? prevCount - 1 : prevCount + 1);
 
       try {
-        await hiveVote(
-          session.decryptedKey,
-          session.username,
+        await castVote(
+          session!,
           post.author,
           post.permlink,
           previousLikedState ? 0 : 10000 // Full vote weight
@@ -168,7 +167,7 @@ export function ConversationReply({
         <View style={dynamicStyles.leftColumn}>
           <Pressable onPress={handleProfilePress}>
             <Image
-              source={{ uri: `${HIVE_AVATAR_URL}/${post.author}/avatar/small` }}
+              source={{ uri: displayAvatar }}
               style={dynamicStyles.profileImage}
               alt={`${post.author}'s avatar`}
             />
@@ -180,7 +179,7 @@ export function ConversationReply({
           {/* Header */}
           <View style={styles.headerContainer}>
             <Pressable onPress={handleProfilePress}>
-              <Text style={styles.authorText}>{post.author}</Text>
+              <Text style={styles.authorText}>{displayAuthor}</Text>
             </Pressable>
             <Text style={styles.dateText}>
               {(() => {

@@ -105,7 +105,7 @@ function countryToFlag(location: string): string {
 }
 
 export default function ProfileScreen() {
-  const { username: currentUsername, logout } = useAuth();
+  const { username: currentUsername, logout, session } = useAuth();
   const params = useLocalSearchParams();
   const [followersModalVisible, setFollowersModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
@@ -360,6 +360,33 @@ export default function ProfileScreen() {
 
   if (isLoadingProfile) {
     return <LoadingScreen />;
+  }
+
+  // Email/lite account with no on-chain Hive account yet — friendly state
+  // instead of an error (their handle is reserved, not yet claimed on Hive).
+  if (
+    session?.kind === "userbase" &&
+    profileUsername === currentUsername &&
+    (error || !hiveAccount)
+  ) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={{ fontSize: 44, marginBottom: 12 }}>🛹</Text>
+        <Text style={{ fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.lg, color: theme.colors.text }}>
+          @{currentUsername}
+        </Text>
+        <Text style={[styles.errorText, { marginTop: 10, textAlign: "center", paddingHorizontal: 24 }]}>
+          You're on a SkateHive lite account. You can post, comment and vote right now —
+          your activity goes out through the SkateHive community account. Get sponsored to
+          claim your own @{currentUsername} on Hive.
+        </Text>
+        <Pressable onPress={logout} style={{ marginTop: 28 }}>
+          <Text style={{ color: theme.colors.primary, fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.md }}>
+            Log out
+          </Text>
+        </Pressable>
+      </View>
+    );
   }
 
   // Only show error for non-SPECTATOR users when there's an actual error or missing account

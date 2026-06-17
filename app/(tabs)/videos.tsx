@@ -6,10 +6,12 @@ import {
   Text,
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   Share,
   useWindowDimensions,
   ViewToken,
   Animated,
+  Easing,
   type GestureResponderEvent,
 } from "react-native";
 import { Image } from "expo-image";
@@ -18,12 +20,33 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "~/lib/auth-provider";
-import { vote as hiveVote } from "~/lib/hive-utils";
+import { castVote, canPost } from "~/lib/posting";
+import { useSoftPostOverlay } from "~/lib/userbase/soft-post-context";
 import { useToast } from "~/lib/toast-provider";
 import { useVideoFeed, type VideoPost } from "~/lib/hooks/useQueries";
 import { theme } from "~/lib/theme";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
 import { FullConversationDrawer } from "~/components/Feed/FullConversationDrawer";
+
+// ─── Double-tap "$" money burst ──────────────────────────────────────────────
+// Cash-toss physics: each "$" pops up + out from the tap point, then gravity
+// rains it back down while it spins and fades. Big, bold, widely spread so the
+// glyph stays legible instead of clumping.
+const CONFETTI_COUNT = 12;
+type Particle = { dx: number; rise: number; fall: number; rotate: number; size: number };
+
+function makeConfetti(): Particle[] {
+  return Array.from({ length: CONFETTI_COUNT }, (_, i) => {
+    const dir = i % 2 === 0 ? 1 : -1; // alternate sides for an even fan-out
+    return {
+      dx: dir * (60 + Math.random() * 190),      // wide horizontal spread
+      rise: 80 + Math.random() * 150,             // how high it pops before falling
+      fall: 260 + Math.random() * 220,            // how far it rains down past the tap
+      rotate: (Math.random() * 2 - 1) * 480,      // lazy tumble, either direction
+      size: 30 + Math.random() * 24,              // big enough to read the "$"
+    };
+  });
+}
 
 // ─── Native video item ─────────────────────────────────────────────────────
 // Each item gets its own expo-video player — no WebView overhead.
@@ -56,7 +79,10 @@ function VideoItem({
   const isVoting = votingStates[key] ?? false;
   const voteCount = voteCountStates[key] ?? item.votes;
   const router = useRouter();
-  const avatarUrl = `${HIVE_AVATAR_URL}/${item.username}/avatar`;
+  // Mask the shared @skateuser account with the real (email/lite) author.
+  const softOverlay = useSoftPostOverlay(item.author, item.permlink);
+  const displayName = softOverlay?.handle || item.username;
+  const avatarUrl = softOverlay?.avatar_url || `${HIVE_AVATAR_URL}/${displayName}/avatar`;
 
   // Native video player — fast, no WebView
   const player = useVideoPlayer(item.videoUrl, (p) => {
@@ -91,32 +117,33 @@ function VideoItem({
     return value > 0 ? `$${value.toFixed(2)}` : "";
   };
 
-  // ── Double-tap to vote (TikTok/IG-style heart burst) ──────────────────────
+  // ── Double-tap to vote ($-sign confetti burst) ────────────────────────────
   const canVote = !!username && username !== "SPECTATOR";
   const lastTap = useRef(0);
-  const [burst, setBurst] = useState<{ x: number; y: number; tilt: number } | null>(null);
-  const burstScale = useRef(new Animated.Value(0)).current;
-  const burstOpacity = useRef(new Animated.Value(0)).current;
-  const burstLift = useRef(new Animated.Value(0)).current;
+  const [burst, setBurst] = useState<{ x: number; y: number; particles: Particle[] } | null>(null);
+  // One driver per particle so they can launch in a quick stagger (a "spray"),
+  // not all at once — reused across taps.
+  const burstVals = useRef(
+    Array.from({ length: CONFETTI_COUNT }, () => new Animated.Value(0))
+  ).current;
 
   const playBurst = useCallback((x: number, y: number) => {
-    setBurst({ x, y, tilt: Math.random() * 24 - 12 });
-    burstScale.setValue(0);
-    burstOpacity.setValue(1);
-    burstLift.setValue(0);
-    Animated.parallel([
-      Animated.spring(burstScale, { toValue: 1, friction: 4, tension: 130, useNativeDriver: true }),
-      Animated.sequence([
-        Animated.delay(420),
-        Animated.parallel([
-          Animated.timing(burstOpacity, { toValue: 0, duration: 320, useNativeDriver: true }),
-          Animated.timing(burstLift, { toValue: -70, duration: 320, useNativeDriver: true }),
-        ]),
-      ]),
-    ]).start(({ finished }) => {
+    setBurst({ x, y, particles: makeConfetti() });
+    burstVals.forEach((v) => v.setValue(0));
+    Animated.stagger(
+      28,
+      burstVals.map((v) =>
+        Animated.timing(v, {
+          toValue: 1,
+          duration: 1050,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        })
+      )
+    ).start(({ finished }) => {
       if (finished) setBurst(null);
     });
-  }, [burstScale, burstOpacity, burstLift]);
+  }, [burstVals]);
 
   const handleVideoTap = useCallback((e: GestureResponderEvent) => {
     const now = Date.now();
@@ -168,26 +195,57 @@ function VideoItem({
           buttons/overlays (which are later siblings, so they keep their taps). */}
       <Pressable style={StyleSheet.absoluteFill} onPress={handleVideoTap} />
 
-      {/* Heart burst at the tap point */}
+      {/* "$" money burst at the tap point */}
       {burst && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.burst,
-            {
-              left: burst.x - 60,
-              top: burst.y - 60,
-              opacity: burstOpacity,
-              transform: [
-                { translateY: burstLift },
-                { scale: burstScale },
-                { rotate: `${burst.tilt}deg` },
-              ],
-            },
-          ]}
-        >
-          <Ionicons name="heart" size={120} color={theme.colors.primary} />
-        </Animated.View>
+        <View pointerEvents="none" style={[styles.burst, { left: burst.x, top: burst.y }]}>
+          {burst.particles.map((p, i) => {
+            const v = burstVals[i];
+            return (
+              <Animated.Text
+                key={i}
+                style={[
+                  styles.confetti,
+                  {
+                    fontSize: p.size,
+                    opacity: v.interpolate({
+                      inputRange: [0, 0.12, 0.72, 1],
+                      outputRange: [0, 1, 1, 0],
+                    }),
+                    transform: [
+                      {
+                        translateX: v.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, p.dx],
+                        }),
+                      },
+                      {
+                        // pop up, then gravity rains it back down past the tap
+                        translateY: v.interpolate({
+                          inputRange: [0, 0.4, 1],
+                          outputRange: [0, -p.rise, p.fall],
+                        }),
+                      },
+                      {
+                        rotate: v.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ["0deg", `${p.rotate}deg`],
+                        }),
+                      },
+                      {
+                        scale: v.interpolate({
+                          inputRange: [0, 0.2, 1],
+                          outputRange: [0.3, 1.2, 0.9],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                $
+              </Animated.Text>
+            );
+          })}
+        </View>
       )}
 
       {/* Top: user info */}
@@ -197,7 +255,7 @@ function VideoItem({
           onPress={() => router.push(`/(tabs)/profile?username=${item.username}`)}
         >
           <Image source={{ uri: avatarUrl }} style={styles.avatar} transition={0} />
-          <Text style={styles.username}>@{item.username}</Text>
+          <Text style={styles.username}>@{displayName}</Text>
         </Pressable>
       </View>
 
@@ -254,7 +312,7 @@ export default function VideosScreen() {
   const router = useRouter();
   const { session, username } = useAuth();
   const { showToast } = useToast();
-  const { data: videos = [], isLoading } = useVideoFeed();
+  const { data: videos = [], isLoading, refetch, isRefetching } = useVideoFeed();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [votingStates, setVotingStates] = useState<Record<string, boolean>>({});
   const votingLockRef = useRef<Record<string, boolean>>({});
@@ -284,7 +342,7 @@ export default function VideosScreen() {
 
   const handleVote = useCallback(async (video: VideoPost) => {
     const key = `${video.author}-${video.permlink}`;
-    if (!session?.username || session.username === "SPECTATOR" || !session?.decryptedKey) {
+    if (!canPost(session)) {
       showToast("Please login first", "error");
       return;
     }
@@ -301,7 +359,7 @@ export default function VideosScreen() {
       setLikedStates((p) => ({ ...p, [key]: !wasLiked }));
       setVoteCountStates((p) => ({ ...p, [key]: wasLiked ? prevCount - 1 : prevCount + 1 }));
 
-      await hiveVote(session.decryptedKey, session.username, video.author, video.permlink, wasLiked ? 0 : 10000);
+      await castVote(session!, video.author, video.permlink, wasLiked ? 0 : 10000);
       showToast(wasLiked ? "Vote removed" : "Voted!", "success");
     } catch (error) {
       setLikedStates((p) => ({ ...p, [key]: wasLiked }));
@@ -374,6 +432,17 @@ export default function VideosScreen() {
           keyExtractor={(item) => `${item.author}-${item.permlink}`}
           pagingEnabled
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                refetch();
+              }}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
+            />
+          }
           snapToAlignment="start"
           snapToInterval={SCREEN_HEIGHT}
           decelerationRate="fast"
@@ -429,17 +498,20 @@ const styles = StyleSheet.create({
   // videoContainer dimensions are set inline via useWindowDimensions in VideoItem
   videoContainer: { backgroundColor: "#000" },
   nativeVideo: { ...StyleSheet.absoluteFillObject },
+  // Zero-size anchor at the tap point; particles spread out from here.
   burst: {
     position: "absolute",
-    width: 120,
-    height: 120,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 0,
+    height: 0,
     zIndex: 20,
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 16,
+  },
+  confetti: {
+    position: "absolute",
+    color: theme.colors.primary,
+    fontFamily: theme.fonts.bold,
+    textShadowColor: theme.colors.primary,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   thumbnail: { ...StyleSheet.absoluteFillObject, zIndex: 2 },
   spinnerOverlay: {
