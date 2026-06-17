@@ -82,6 +82,28 @@ export function logout(token: string): Promise<{ success: boolean }> {
   return postJson("/auth/logout", {}, token);
 }
 
+export interface SoftPostOverlay {
+  id: string;
+  handle: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+export interface SoftPostResult {
+  author: string;
+  permlink: string;
+  user: SoftPostOverlay | null;
+}
+/** Batch-map on-chain @skateuser posts to their real authors (feed masking). */
+export async function fetchSoftPosts(
+  posts: { author: string; permlink: string }[]
+): Promise<SoftPostResult[]> {
+  const r = await postJson<{ success: boolean; results?: SoftPostResult[] }>(
+    "/soft-posts",
+    { posts }
+  );
+  return r.results || [];
+}
+
 export interface VoteArgs { author: string; permlink: string; weight: number }
 export function vote(token: string, args: VoteArgs): Promise<{ success: boolean; error?: string }> {
   return postJson("/hive/vote", args, token);

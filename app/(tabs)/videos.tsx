@@ -21,6 +21,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "~/lib/auth-provider";
 import { castVote, canPost } from "~/lib/posting";
+import { useSoftPostOverlay } from "~/lib/userbase/soft-post-context";
 import { useToast } from "~/lib/toast-provider";
 import { useVideoFeed, type VideoPost } from "~/lib/hooks/useQueries";
 import { theme } from "~/lib/theme";
@@ -78,7 +79,10 @@ function VideoItem({
   const isVoting = votingStates[key] ?? false;
   const voteCount = voteCountStates[key] ?? item.votes;
   const router = useRouter();
-  const avatarUrl = `${HIVE_AVATAR_URL}/${item.username}/avatar`;
+  // Mask the shared @skateuser account with the real (email/lite) author.
+  const softOverlay = useSoftPostOverlay(item.author, item.permlink);
+  const displayName = softOverlay?.handle || item.username;
+  const avatarUrl = softOverlay?.avatar_url || `${HIVE_AVATAR_URL}/${displayName}/avatar`;
 
   // Native video player — fast, no WebView
   const player = useVideoPlayer(item.videoUrl, (p) => {
@@ -251,7 +255,7 @@ function VideoItem({
           onPress={() => router.push(`/(tabs)/profile?username=${item.username}`)}
         >
           <Image source={{ uri: avatarUrl }} style={styles.avatar} transition={0} />
-          <Text style={styles.username}>@{item.username}</Text>
+          <Text style={styles.username}>@{displayName}</Text>
         </Pressable>
       </View>
 

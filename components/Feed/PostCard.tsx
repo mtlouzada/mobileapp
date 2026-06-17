@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useEffect, useMemo } from "react";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
+import { useSoftPostOverlay } from "~/lib/userbase/soft-post-context";
 import { FontAwesome } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import {
@@ -65,6 +66,10 @@ interface PostCardProps {
 
 export const PostCard = React.memo(
   ({ post, currentUsername, onOpenFullConversation }: PostCardProps) => {
+    // Mask the shared @skateuser account with the real (email/lite) author.
+    const softOverlay = useSoftPostOverlay(post.author, post.permlink);
+    const displayAuthor = softOverlay?.handle || post.author;
+    const displayAvatar = softOverlay?.avatar_url || `${HIVE_AVATAR_URL}/${displayAuthor}/avatar/small`;
     const { session, followingList, updateUserRelationship } = useAuth();
     const { estimateVoteValue, isLoading: isVoteValueLoading } =
       useVoteValue(currentUsername);
@@ -383,11 +388,11 @@ export const PostCard = React.memo(
               <Pressable onPress={handleProfilePress}>
                 <Image
                   source={{
-                    uri: `${HIVE_AVATAR_URL}/${post.author}/avatar/small`,
+                    uri: displayAvatar,
                   }}
                   style={styles.profileImage}
                   transition={200}
-                  recyclingKey={post.author}
+                  recyclingKey={displayAuthor}
                 />
               </Pressable>
             </View>
@@ -397,7 +402,7 @@ export const PostCard = React.memo(
               {/* Header with author and date */}
               <View style={styles.headerContainer}>
                 <Pressable onPress={handleProfilePress}>
-                  <Text style={styles.authorText}>{post.author}</Text>
+                  <Text style={styles.authorText}>{displayAuthor}</Text>
                 </Pressable>
                 <Text style={styles.dateText}>{formattedDate}</Text>
 
