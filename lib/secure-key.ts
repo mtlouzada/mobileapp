@@ -20,13 +20,18 @@ export interface KdfParams {
 // were derived with these — keep them so existing users can still unlock.
 export const LEGACY_KDF: KdfParams = { iterations: 5000, hasher: 'SHA1' };
 
-// Params for newly stored / re-encrypted keys. crypto-js runs PBKDF2 in pure JS,
-// so the OWASP 600k SHA-256 target is too slow on-device; 100k SHA-256 is a 20x
-// work-factor increase over the legacy 5k SHA-1 while keeping PIN unlock ~1s.
-// Bump further once a native PBKDF2 is available. Changing this is safe: the
-// params travel with each stored key (see `EncryptedKey.kdf`) and old keys are
-// lazily re-encrypted on next successful PIN login.
-export const CURRENT_KDF: KdfParams = { iterations: 100000, hasher: 'SHA256' };
+// Params for newly stored / re-encrypted keys.
+//
+// IMPORTANT: crypto-js runs PBKDF2 synchronously in pure JS, and on Hermes
+// (the on-device engine) it is ~20-30x slower than Node. 100k iterations froze
+// the JS thread for tens of seconds and made PIN login appear to hang, so we
+// keep the cost at the original level here. Raising the work factor safely
+// requires a NATIVE PBKDF2 (e.g. react-native-quick-crypto / a tiny native
+// module) — expo-crypto has no iterated KDF. The versioning scaffold below
+// (params travel with each key via `EncryptedKey.kdf`, old keys re-encrypt
+// lazily) means CURRENT_KDF can be bumped to strong native params later without
+// locking anyone out.
+export const CURRENT_KDF: KdfParams = { iterations: 5000, hasher: 'SHA1' };
 
 export interface EncryptedKey {
   username: string;
