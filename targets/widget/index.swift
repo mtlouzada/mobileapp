@@ -213,11 +213,42 @@ struct TopSpotsWidget: Widget {
   }
 }
 
+// MARK: - Widget 4: Add Spot (static action tile → opens the camera spot flow)
+
+// No timeline data needed — it's a pure action launcher. A single static entry,
+// never refreshed.
+struct AddSpotEntry: TimelineEntry { let date: Date }
+
+struct AddSpotProvider: TimelineProvider {
+  func placeholder(in context: Context) -> AddSpotEntry { AddSpotEntry(date: Date()) }
+  func getSnapshot(in context: Context, completion: @escaping (AddSpotEntry) -> Void) {
+    completion(AddSpotEntry(date: Date()))
+  }
+  func getTimeline(in context: Context, completion: @escaping (Timeline<AddSpotEntry>) -> Void) {
+    completion(Timeline(entries: [AddSpotEntry(date: Date())], policy: .never))
+  }
+}
+
+struct AddSpotWidget: Widget {
+  let kind = "AddSpotWidget"
+
+  var body: some WidgetConfiguration {
+    StaticConfiguration(kind: kind, provider: AddSpotProvider()) { _ in
+      AddSpotView()
+    }
+    .configurationDisplayName("Add Spot")
+    .description("Tap to open SkateHive's camera and add a new skate spot.")
+    .supportedFamilies([.systemSmall])
+    .edgeToEdge()
+  }
+}
+
 @main
 struct SkateSpotsBundle: WidgetBundle {
   var body: some Widget {
     NearestSpotWidget()
     SpotMapWidget()
     TopSpotsWidget()
+    AddSpotWidget()
   }
 }

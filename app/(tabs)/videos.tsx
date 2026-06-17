@@ -10,6 +10,7 @@ import {
   useWindowDimensions,
   ViewToken,
   Animated,
+  Easing,
   type GestureResponderEvent,
 } from "react-native";
 import { Image } from "expo-image";
@@ -24,6 +25,26 @@ import { useVideoFeed, type VideoPost } from "~/lib/hooks/useQueries";
 import { theme } from "~/lib/theme";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
 import { FullConversationDrawer } from "~/components/Feed/FullConversationDrawer";
+
+// ─── Double-tap "$" money burst ──────────────────────────────────────────────
+// Cash-toss physics: each "$" pops up + out from the tap point, then gravity
+// rains it back down while it spins and fades. Big, bold, widely spread so the
+// glyph stays legible instead of clumping.
+const CONFETTI_COUNT = 12;
+type Particle = { dx: number; rise: number; fall: number; rotate: number; size: number };
+
+function makeConfetti(): Particle[] {
+  return Array.from({ length: CONFETTI_COUNT }, (_, i) => {
+    const dir = i % 2 === 0 ? 1 : -1; // alternate sides for an even fan-out
+    return {
+      dx: dir * (60 + Math.random() * 190),      // wide horizontal spread
+      rise: 80 + Math.random() * 150,             // how high it pops before falling
+      fall: 260 + Math.random() * 220,            // how far it rains down past the tap
+      rotate: (Math.random() * 2 - 1) * 480,      // lazy tumble, either direction
+      size: 30 + Math.random() * 24,              // big enough to read the "$"
+    };
+  });
+}
 
 // ─── Native video item ─────────────────────────────────────────────────────
 // Each item gets its own expo-video player — no WebView overhead.
@@ -91,32 +112,33 @@ function VideoItem({
     return value > 0 ? `$${value.toFixed(2)}` : "";
   };
 
-  // ── Double-tap to vote (TikTok/IG-style heart burst) ──────────────────────
+  // ── Double-tap to vote ($-sign confetti burst) ────────────────────────────
   const canVote = !!username && username !== "SPECTATOR";
   const lastTap = useRef(0);
-  const [burst, setBurst] = useState<{ x: number; y: number; tilt: number } | null>(null);
-  const burstScale = useRef(new Animated.Value(0)).current;
-  const burstOpacity = useRef(new Animated.Value(0)).current;
-  const burstLift = useRef(new Animated.Value(0)).current;
+  const [burst, setBurst] = useState<{ x: number; y: number; particles: Particle[] } | null>(null);
+  // One driver per particle so they can launch in a quick stagger (a "spray"),
+  // not all at once — reused across taps.
+  const burstVals = useRef(
+    Array.from({ length: CONFETTI_COUNT }, () => new Animated.Value(0))
+  ).current;
 
   const playBurst = useCallback((x: number, y: number) => {
-    setBurst({ x, y, tilt: Math.random() * 24 - 12 });
-    burstScale.setValue(0);
-    burstOpacity.setValue(1);
-    burstLift.setValue(0);
-    Animated.parallel([
-      Animated.spring(burstScale, { toValue: 1, friction: 4, tension: 130, useNativeDriver: true }),
-      Animated.sequence([
-        Animated.delay(420),
-        Animated.parallel([
-          Animated.timing(burstOpacity, { toValue: 0, duration: 320, useNativeDriver: true }),
-          Animated.timing(burstLift, { toValue: -70, duration: 320, useNativeDriver: true }),
-        ]),
-      ]),
-    ]).start(({ finished }) => {
+    setBurst({ x, y, particles: makeConfetti() });
+    burstVals.forEach((v) => v.setValue(0));
+    Animated.stagger(
+      28,
+      burstVals.map((v) =>
+        Animated.timing(v, {
+          toValue: 1,
+          duration: 1050,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        })
+      )
+    ).start(({ finished }) => {
       if (finished) setBurst(null);
     });
-  }, [burstScale, burstOpacity, burstLift]);
+  }, [burstVals]);
 
   const handleVideoTap = useCallback((e: GestureResponderEvent) => {
     const now = Date.now();
@@ -168,26 +190,57 @@ function VideoItem({
           buttons/overlays (which are later siblings, so they keep their taps). */}
       <Pressable style={StyleSheet.absoluteFill} onPress={handleVideoTap} />
 
-      {/* Heart burst at the tap point */}
+      {/* "$" money burst at the tap point */}
       {burst && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.burst,
-            {
-              left: burst.x - 60,
-              top: burst.y - 60,
-              opacity: burstOpacity,
-              transform: [
-                { translateY: burstLift },
-                { scale: burstScale },
-                { rotate: `${burst.tilt}deg` },
-              ],
-            },
-          ]}
-        >
-          <Ionicons name="heart" size={120} color={theme.colors.primary} />
-        </Animated.View>
+        <View pointerEvents="none" style={[styles.burst, { left: burst.x, top: burst.y }]}>
+          {burst.particles.map((p, i) => {
+            const v = burstVals[i];
+            return (
+              <Animated.Text
+                key={i}
+                style={[
+                  styles.confetti,
+                  {
+                    fontSize: p.size,
+                    opacity: v.interpolate({
+                      inputRange: [0, 0.12, 0.72, 1],
+                      outputRange: [0, 1, 1, 0],
+                    }),
+                    transform: [
+                      {
+                        translateX: v.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, p.dx],
+                        }),
+                      },
+                      {
+                        // pop up, then gravity rains it back down past the tap
+                        translateY: v.interpolate({
+                          inputRange: [0, 0.4, 1],
+                          outputRange: [0, -p.rise, p.fall],
+                        }),
+                      },
+                      {
+                        rotate: v.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ["0deg", `${p.rotate}deg`],
+                        }),
+                      },
+                      {
+                        scale: v.interpolate({
+                          inputRange: [0, 0.2, 1],
+                          outputRange: [0.3, 1.2, 0.9],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                $
+              </Animated.Text>
+            );
+          })}
+        </View>
       )}
 
       {/* Top: user info */}
@@ -429,17 +482,20 @@ const styles = StyleSheet.create({
   // videoContainer dimensions are set inline via useWindowDimensions in VideoItem
   videoContainer: { backgroundColor: "#000" },
   nativeVideo: { ...StyleSheet.absoluteFillObject },
+  // Zero-size anchor at the tap point; particles spread out from here.
   burst: {
     position: "absolute",
-    width: 120,
-    height: 120,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 0,
+    height: 0,
     zIndex: 20,
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 16,
+  },
+  confetti: {
+    position: "absolute",
+    color: theme.colors.primary,
+    fontFamily: theme.fonts.bold,
+    textShadowColor: theme.colors.primary,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 8,
   },
   thumbnail: { ...StyleSheet.absoluteFillObject, zIndex: 2 },
   spinnerOverlay: {

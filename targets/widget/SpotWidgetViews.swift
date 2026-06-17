@@ -385,3 +385,31 @@ struct EmptyStateView: View {
     .widgetURL(appURL("/map"))
   }
 }
+
+// MARK: - Add Spot (action tile → opens the app's camera spot flow)
+
+struct AddSpotView: View {
+  var body: some View {
+    ZStack {
+      HUDGrid()
+      VStack(spacing: 8) {
+        ZStack {
+          Circle()
+            .strokeBorder(accent, lineWidth: 3)
+            .frame(width: 54, height: 54)
+          Image(systemName: "camera.fill")
+            .font(.system(size: 22, weight: .bold))
+            .foregroundColor(accent)
+        }
+        Text("ADD SPOT").font(mono(13, .bold)).foregroundColor(.white)
+        Text("// TAP TO CAPTURE\nA NEW SKATE SPOT")
+          .font(mono(9)).foregroundColor(.gray).multilineTextAlignment(.center)
+      }
+      .legible()
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .widgetBackground(.black)
+    // Opens the app straight into the spot flow with the camera open.
+    .widgetURL(appURL("/spot-create?camera=1"))
+  }
+}

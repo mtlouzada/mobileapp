@@ -9,7 +9,7 @@ import {
   Alert,
   Image,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -53,6 +53,9 @@ export default function SpotCreateScreen() {
   const { username, session } = useAuth();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  // ?camera=1 (from the Home Screen "Add Spot" widget) auto-opens the camera.
+  const params = useLocalSearchParams<{ camera?: string }>();
+  const cameraAutoOpenedRef = useRef(false);
 
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [name, setName] = useState("");
@@ -159,6 +162,14 @@ export default function SpotCreateScreen() {
       Alert.alert("Error", "Failed to open camera.");
     }
   };
+
+  // Auto-open the camera when launched from the Add Spot widget. Fires once.
+  useEffect(() => {
+    if (params.camera === "1" && !cameraAutoOpenedRef.current) {
+      cameraAutoOpenedRef.current = true;
+      addFromCamera();
+    }
+  }, [params.camera]);
 
   const removeMedia = (uri: string) => setMedia((prev) => prev.filter((m) => m.uri !== uri));
 
