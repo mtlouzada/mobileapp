@@ -3,7 +3,9 @@
 // sync knows how to parse. Mirrors the web composer so the existing sync picks
 // it up unchanged.
 
-import { comment, getLastSnapsContainer, COMMUNITY_TAG } from "~/lib/hive-utils";
+import { getLastSnapsContainer, COMMUNITY_TAG } from "~/lib/hive-utils";
+import { postComment } from "~/lib/posting";
+import type { AuthSession } from "~/lib/types";
 
 export interface SpotMedia {
   /** Markdown image lines and/or video iframes already uploaded, in order. */
@@ -12,8 +14,6 @@ export interface SpotMedia {
 }
 
 export interface SubmitSpotInput {
-  username: string;
-  privateKey: string;
   name: string;
   lat: number;
   lng: number;
@@ -48,7 +48,7 @@ function generateSpotPermlink(): string {
  *   ![spot](image-url)
  *   <iframe ...></iframe>
  */
-export function buildSpotBody(input: Omit<SubmitSpotInput, "username" | "privateKey">): string {
+export function buildSpotBody(input: SubmitSpotInput): string {
   const { name, lat, lng, address, description, media } = input;
   const coords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
   const locationLine = address ? `🌐 ${coords} (${address})` : `🌐 ${coords}`;
@@ -68,9 +68,10 @@ export function buildSpotBody(input: Omit<SubmitSpotInput, "username" | "private
  * Broadcast the spot snap. Returns the author + permlink so the caller can
  * optimistically pin it and trigger the targeted server sync.
  */
-export async function submitSpot(input: SubmitSpotInput): Promise<SubmitSpotResult> {
-  const { username, privateKey } = input;
-
+export async function submitSpot(
+  session: AuthSession,
+  input: SubmitSpotInput
+): Promise<SubmitSpotResult> {
   // Post under the latest snaps container so the spotmap sync's
   // parent_permlink filter matches (same as the web composer). If the container
   // lookup fails we must abort: a top-level post (parent_author="") would carry
@@ -95,7 +96,16 @@ export async function submitSpot(input: SubmitSpotInput): Promise<SubmitSpotResu
     tags: [COMMUNITY_TAG, SPOT_TAG],
   };
 
-  await comment(privateKey, parentAuthor, parentPermlink, username, permlink, "", body, jsonMetadata);
+  // Routes through the unified posting seam: server-signed via @skateuser for
+  // lite accounts, or the local key for full Hive accounts.
+  const res = await postComment(session, {
+    parentAuthor,
+    parentPermlink,
+    permlink,
+    title: "",
+    body,
+    jsonMetadata,
+  });
 
-  return { author: username, permlink };
+  return { author: res.author, permlink: res.permlink || permlink };
 }
