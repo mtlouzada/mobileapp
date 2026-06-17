@@ -20,13 +20,14 @@ import {
   checkUsername,
   type UserbaseUser,
 } from "~/lib/userbase/api";
-import { saveUserbaseSession } from "~/lib/userbase/session-store";
+import { useAuth } from "~/lib/auth-provider";
 
 type Step = "email" | "otp" | "username" | "done";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function EmailLoginScreen() {
+  const { loginWithUserbase } = useAuth();
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -94,7 +95,7 @@ export default function EmailLoginScreen() {
       const r = await verifyOtp(email, code.trim());
       if (!r.success) throw new Error(r.error || "Invalid code");
       if (r.token && r.user) {
-        await saveUserbaseSession(r.token, r.user);
+        await loginWithUserbase(r.token, r.user);
         setUser(r.user);
         setStep("done");
       } else if (r.signupRequired && r.signupToken) {
@@ -117,7 +118,7 @@ export default function EmailLoginScreen() {
     try {
       const r = await completeSignup(signupToken, name);
       if (!r.success || !r.token || !r.user) throw new Error(r.error || "Could not create account");
-      await saveUserbaseSession(r.token, r.user);
+      await loginWithUserbase(r.token, r.user);
       setUser(r.user);
       setStep("done");
     } catch (e) {

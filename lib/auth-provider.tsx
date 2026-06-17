@@ -27,6 +27,13 @@ import {
   getUserRelationshipList,
   setUserRelationship
 } from './hive-utils';
+import type { UserbaseUser } from './userbase/api';
+import { logout as userbaseLogout } from './userbase/api';
+import {
+  loadUserbaseSession,
+  saveUserbaseSession,
+  clearUserbaseSession,
+} from './userbase/session-store';
 
 // ============================================================================
 // APPLE REVIEW TEST ACCOUNT CONFIGURATION
@@ -71,6 +78,7 @@ interface AuthContextType {
   blacklistedList: string[];
   login: (username: string, postingKey: string, method: EncryptionMethod, pin?: string) => Promise<void>;
   loginStoredUser: (username: string, pin?: string) => Promise<void>;
+  loginWithUserbase: (token: string, user: UserbaseUser) => Promise<void>;
   logout: () => Promise<void>;
   enterSpectatorMode: () => Promise<void>;
   deleteAllStoredUsers: () => Promise<void>;
@@ -163,7 +171,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Load user relationship lists (following, muted, blacklisted)
   const refreshUserRelationships = async () => {
-    if (!username || username === 'SPECTATOR') {
+    // Userbase (email) accounts may not have an on-chain Hive account yet, so
+    // skip the relationship RPC (it would error on a non-existent account).
+    if (!username || username === 'SPECTATOR' || session?.kind === 'userbase') {
       setFollowingList([]);
       setMutedList([]);
       setBlacklistedList([]);
@@ -243,7 +253,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Check if a user is already logged in (restore session)
   const checkCurrentUser = async () => {
     try {
-      // Do not auto-login: always require full login for decrypted key
+      // Userbase (email) sessions are token-based / server-custody, so it's
+      // safe to auto-restore them on launch (no local key to decrypt). Hive-key
+      // accounts still require an explicit PIN/biometric login each time.
+      const ub = await loadUserbaseSession();
+      if (ub?.token && ub.user) {
+        setUsername(ub.user.handle);
+        setIsAuthenticated(true);
+        setSession({
+          username: ub.user.handle,
+          decryptedKey: '',
+          loginTime: Date.now(),
+          kind: 'userbase',
+          userbaseToken: ub.token,
+        });
+        return;
+      }
+      // Do not auto-login Hive accounts: always require full login for the key.
       setUsername(null);
       setIsAuthenticated(false);
       setSession(null);
@@ -252,6 +278,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Log in a server-custody email (userbase) account: persist the bearer token
+  // and mark the app authenticated. No local posting key (the server signs).
+  const loginWithUserbase = async (token: string, user: UserbaseUser) => {
+    await saveUserbaseSession(token, user);
+    setUsername(user.handle);
+    setIsAuthenticated(true);
+    setSession({
+      username: user.handle,
+      decryptedKey: '',
+      loginTime: Date.now(),
+      kind: 'userbase',
+      userbaseToken: token,
+    });
   };
 
   // Update stored users list in SecureStore
@@ -424,6 +465,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       clearInactivityTimer();
+      // Revoke + clear any userbase (email) session.
+      if (session?.kind === 'userbase' && session.userbaseToken) {
+        userbaseLogout(session.userbaseToken).catch(() => {});
+      }
+      await clearUserbaseSession();
       setSession(null);
       setIsAuthenticated(false);
       setUsername(null);
@@ -479,6 +525,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     blacklistedList,
     login,
     loginStoredUser,
+    loginWithUserbase,
     logout,
     enterSpectatorMode,
     deleteAllStoredUsers,
