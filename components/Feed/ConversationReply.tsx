@@ -16,7 +16,7 @@ import { MediaPreview } from './MediaPreview';
 import { ReplyComposer } from '../ui/ReplyComposer';
 import { useAuth } from '~/lib/auth-provider';
 import { useToast } from '~/lib/toast-provider';
-import { vote as hiveVote } from '~/lib/hive-utils';
+import { castVote, canPost } from '~/lib/posting';
 import { theme } from '~/lib/theme';
 import { extractMediaFromBody } from '~/lib/utils';
 import type { Discussion } from '@hiveio/dhive';
@@ -82,12 +82,7 @@ export function ConversationReply({
     try {
       setIsVoting(true);
 
-      if (!session || !session.username || !session.decryptedKey) {
-        showToast('Please login first', 'error');
-        return;
-      }
-
-      if (session.username === "SPECTATOR") {
+      if (!canPost(session)) {
         showToast('Please login first', 'error');
         return;
       }
@@ -99,9 +94,8 @@ export function ConversationReply({
       setVoteCount(prevCount => previousLikedState ? prevCount - 1 : prevCount + 1);
 
       try {
-        await hiveVote(
-          session.decryptedKey,
-          session.username,
+        await castVote(
+          session!,
           post.author,
           post.permlink,
           previousLikedState ? 0 : 10000 // Full vote weight

@@ -17,6 +17,7 @@ import { VideoPlayer } from '../Feed/VideoPlayer';
 import { useAuth } from '~/lib/auth-provider';
 import { useToast } from '~/lib/toast-provider';
 import { createHiveComment } from '~/lib/upload/post-utils';
+import { canPost, isUserbaseSession, postComment } from '~/lib/posting';
 import { uploadVideoToWorker, createVideoIframe } from '~/lib/upload/video-upload';
 import { uploadImageToHive, createImageMarkdown } from '~/lib/upload/image-upload';
 import { theme } from '~/lib/theme';
@@ -109,8 +110,13 @@ export function ReplyComposer({
       return;
     }
 
-    if (!username || username === "SPECTATOR" || !session?.decryptedKey) {
+    if (!username || !canPost(session)) {
       Alert.alert("Authentication Required", "Please log in to reply");
+      return;
+    }
+    // Email (server-custody) accounts can't sign client-side media uploads yet.
+    if (isUserbaseSession(session) && media) {
+      Alert.alert("Coming soon", "Photo/video replies for email accounts aren't supported yet — text replies work.");
       return;
     }
 
@@ -136,7 +142,7 @@ export function ReplyComposer({
               mediaMimeType,
               {
                 username,
-                privateKey: session.decryptedKey,
+                privateKey: session!.decryptedKey,
               }
             );
             
@@ -175,16 +181,20 @@ export function ReplyComposer({
 
       setUploadProgress("Posting reply...");
 
-      // Post reply to blockchain
-      await createHiveComment(
-        replyBody,
-        parentAuthor,
-        parentPermlink,
-        {
-          username,
-          privateKey: session.decryptedKey,
-        }
-      );
+      // Post reply — server-signed for email accounts, local key otherwise.
+      if (isUserbaseSession(session)) {
+        await postComment(session!, { parentAuthor, parentPermlink, body: replyBody });
+      } else {
+        await createHiveComment(
+          replyBody,
+          parentAuthor,
+          parentPermlink,
+          {
+            username,
+            privateKey: session!.decryptedKey,
+          }
+        );
+      }
 
       // Create optimistic reply object - simplified to avoid type conflicts
       const newReply = {

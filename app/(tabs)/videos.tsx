@@ -6,6 +6,7 @@ import {
   Text,
   ActivityIndicator,
   Pressable,
+  RefreshControl,
   Share,
   useWindowDimensions,
   ViewToken,
@@ -19,7 +20,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "~/lib/auth-provider";
-import { vote as hiveVote } from "~/lib/hive-utils";
+import { castVote, canPost } from "~/lib/posting";
 import { useToast } from "~/lib/toast-provider";
 import { useVideoFeed, type VideoPost } from "~/lib/hooks/useQueries";
 import { theme } from "~/lib/theme";
@@ -307,7 +308,7 @@ export default function VideosScreen() {
   const router = useRouter();
   const { session, username } = useAuth();
   const { showToast } = useToast();
-  const { data: videos = [], isLoading } = useVideoFeed();
+  const { data: videos = [], isLoading, refetch, isRefetching } = useVideoFeed();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [votingStates, setVotingStates] = useState<Record<string, boolean>>({});
   const votingLockRef = useRef<Record<string, boolean>>({});
@@ -337,7 +338,7 @@ export default function VideosScreen() {
 
   const handleVote = useCallback(async (video: VideoPost) => {
     const key = `${video.author}-${video.permlink}`;
-    if (!session?.username || session.username === "SPECTATOR" || !session?.decryptedKey) {
+    if (!canPost(session)) {
       showToast("Please login first", "error");
       return;
     }
@@ -354,7 +355,7 @@ export default function VideosScreen() {
       setLikedStates((p) => ({ ...p, [key]: !wasLiked }));
       setVoteCountStates((p) => ({ ...p, [key]: wasLiked ? prevCount - 1 : prevCount + 1 }));
 
-      await hiveVote(session.decryptedKey, session.username, video.author, video.permlink, wasLiked ? 0 : 10000);
+      await castVote(session!, video.author, video.permlink, wasLiked ? 0 : 10000);
       showToast(wasLiked ? "Vote removed" : "Voted!", "success");
     } catch (error) {
       setLikedStates((p) => ({ ...p, [key]: wasLiked }));
@@ -427,6 +428,17 @@ export default function VideosScreen() {
           keyExtractor={(item) => `${item.author}-${item.permlink}`}
           pagingEnabled
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                refetch();
+              }}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
+            />
+          }
           snapToAlignment="start"
           snapToInterval={SCREEN_HEIGHT}
           decelerationRate="fast"
