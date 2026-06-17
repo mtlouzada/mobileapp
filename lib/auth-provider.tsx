@@ -385,8 +385,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         decryptedKey = decryptKey(encryptedKey.encrypted, secret, encryptedKey.iv);
 
         // Lazy upgrade: transparently re-encrypt legacy keys with the stronger
-        // current params now that we hold the PIN and the plaintext.
-        if (decryptedKey && !encryptedKey.kdf) {
+        // current params now that we hold the PIN and the plaintext. Skip it
+        // entirely when CURRENT_KDF == LEGACY_KDF (no real upgrade), so login
+        // stays a single derivation — a second derive on the JS thread is pure
+        // cost with crypto-js on Hermes.
+        const kdfUpgradeAvailable =
+          CURRENT_KDF.iterations !== LEGACY_KDF.iterations ||
+          CURRENT_KDF.hasher !== LEGACY_KDF.hasher;
+        if (decryptedKey && !encryptedKey.kdf && kdfUpgradeAvailable) {
           try {
             const newSecret = deriveKeyFromPin(pin, encryptedKey.salt, CURRENT_KDF);
             const reEncrypted = encryptKey(decryptedKey, newSecret, encryptedKey.iv);
