@@ -157,6 +157,13 @@ export default function RootLayout() {
                             contentStyle: { backgroundColor: theme.colors.background },
                           }}
                         />
+                        <Stack.Screen
+                          name="email-login"
+                          options={{
+                            presentation: 'modal',
+                            contentStyle: { backgroundColor: theme.colors.background },
+                          }}
+                        />
                         <Stack.Screen 
                           name="(tabs)"
                           options={{
