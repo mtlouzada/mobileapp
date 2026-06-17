@@ -14,7 +14,8 @@ export function useNotifications(disableAutoRefresh: boolean = false) {
   const [hasMore, setHasMore] = useState(true);
 
   const fetchNotifications = useCallback(async (refresh: boolean = false) => {
-    if (!username || username === 'SPECTATOR') {
+    // Email (userbase) accounts may have no on-chain Hive account yet → skip.
+    if (!username || username === 'SPECTATOR' || session?.kind === 'userbase') {
       setNotifications([]);
       return;
     }
@@ -41,7 +42,7 @@ export function useNotifications(disableAutoRefresh: boolean = false) {
     } finally {
       setIsLoading(false);
     }
-  }, [username]);
+  }, [username, session?.kind]);
 
   const loadMoreNotifications = useCallback(async () => {
     if (!username || username === 'SPECTATOR' || isLoadingMore || !hasMore) {
