@@ -135,6 +135,57 @@ export async function uploadImageToHive(
 }
 
 /**
+ * Upload an image for a server-custody (email/lite) account. The device has no
+ * posting key to sign the Hive image challenge, so we convert locally then send
+ * the bytes to api.skatehive.app, which signs + uploads on the user's behalf.
+ */
+export async function uploadImageViaUserbase(
+  fileUri: string,
+  fileName: string,
+  mimeType: string,
+  token: string,
+  options?: { skipConversion?: boolean; conversionQuality?: number }
+): Promise<ImageUploadResult> {
+  try {
+    await activateKeepAwakeAsync('image-upload');
+
+    let uploadUri = fileUri;
+    let uploadMimeType = mimeType;
+    let uploadFileName = fileName;
+    if (!options?.skipConversion) {
+      const prepared = await prepareImageForUpload(fileUri, mimeType, {
+        quality: options?.conversionQuality ?? 0.85,
+        forceConvert: true,
+      });
+      uploadUri = prepared.uri;
+      uploadMimeType = prepared.mimeType;
+      uploadFileName = prepared.fileName;
+    }
+
+    const formData = new FormData();
+    formData.append('file', { uri: uploadUri, type: uploadMimeType, name: uploadFileName } as any);
+
+    const response = await fetch('https://api.skatehive.app/api/userbase/hive/upload-image', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Image upload failed: ${response.status} - ${errorText}`);
+    }
+    const result = await response.json();
+    if (!result.url) throw new Error('No URL returned from image upload');
+    return { url: result.url };
+  } catch (error) {
+    console.error('Failed to upload image via userbase:', error);
+    throw new Error(`Image upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  } finally {
+    deactivateKeepAwake('image-upload');
+  }
+}
+
+/**
  * Create markdown image markup for Hive post
  * @param imageUrl - URL of the uploaded image
  * @param altText - Alt text for the image

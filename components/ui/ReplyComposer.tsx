@@ -19,7 +19,7 @@ import { useToast } from '~/lib/toast-provider';
 import { createHiveComment } from '~/lib/upload/post-utils';
 import { canPost, isUserbaseSession, postComment } from '~/lib/posting';
 import { uploadVideoToWorker, createVideoIframe } from '~/lib/upload/video-upload';
-import { uploadImageToHive, createImageMarkdown } from '~/lib/upload/image-upload';
+import { uploadImageToHive, uploadImageViaUserbase, createImageMarkdown } from '~/lib/upload/image-upload';
 import { theme } from '~/lib/theme';
 import type { Discussion } from '@hiveio/dhive';
 
@@ -114,11 +114,6 @@ export function ReplyComposer({
       Alert.alert("Authentication Required", "Please log in to reply");
       return;
     }
-    // Email (server-custody) accounts can't sign client-side media uploads yet.
-    if (isUserbaseSession(session) && media) {
-      Alert.alert("Coming soon", "Photo/video replies for email accounts aren't supported yet — text replies work.");
-      return;
-    }
 
     setIsUploading(true);
     setUploadProgress("");
@@ -136,16 +131,13 @@ export function ReplyComposer({
           setUploadProgress("Uploading image...");
           
           try {
-            const imageResult = await uploadImageToHive(
-              media,
-              fileName,
-              mediaMimeType,
-              {
-                username,
-                privateKey: session!.decryptedKey,
-              }
-            );
-            
+            const imageResult = isUserbaseSession(session)
+              ? await uploadImageViaUserbase(media, fileName, mediaMimeType, session!.userbaseToken!)
+              : await uploadImageToHive(media, fileName, mediaMimeType, {
+                  username,
+                  privateKey: session!.decryptedKey,
+                });
+
             imageUrls.push(imageResult.url);
             const imageMarkdown = createImageMarkdown(imageResult.url, "Uploaded image");
             replyBody += replyBody ? `\n\n${imageMarkdown}` : imageMarkdown;
