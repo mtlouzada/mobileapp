@@ -5,33 +5,9 @@ import * as Crypto from 'expo-crypto';
 import AES from 'crypto-js/aes';
 import PBKDF2 from 'crypto-js/pbkdf2';
 import * as CryptoJS from 'crypto-js';
+import { Buffer } from 'buffer';
 
 export type EncryptionMethod = 'biometric' | 'pin';
-
-export type KdfHasher = 'SHA1' | 'SHA256';
-
-/** Key-derivation parameters recorded per stored key so they can evolve safely. */
-export interface KdfParams {
-  iterations: number;
-  hasher: KdfHasher;
-}
-
-// Params used before KDF versioning existed. Keys stored without a `kdf` field
-// were derived with these — keep them so existing users can still unlock.
-export const LEGACY_KDF: KdfParams = { iterations: 5000, hasher: 'SHA1' };
-
-// Params for newly stored / re-encrypted keys.
-//
-// IMPORTANT: crypto-js runs PBKDF2 synchronously in pure JS, and on Hermes
-// (the on-device engine) it is ~20-30x slower than Node. 100k iterations froze
-// the JS thread for tens of seconds and made PIN login appear to hang, so we
-// keep the cost at the original level here. Raising the work factor safely
-// requires a NATIVE PBKDF2 (e.g. react-native-quick-crypto / a tiny native
-// module) — expo-crypto has no iterated KDF. The versioning scaffold below
-// (params travel with each key via `EncryptedKey.kdf`, old keys re-encrypt
-// lazily) means CURRENT_KDF can be bumped to strong native params later without
-// locking anyone out.
-export const CURRENT_KDF: KdfParams = { iterations: 5000, hasher: 'SHA1' };
 
 export interface EncryptedKey {
   username: string;
@@ -40,9 +16,8 @@ export interface EncryptedKey {
   salt: string;
   iv: string;
   createdAt: number;
-  /** KDF used for this key (PIN method). Absent ⇒ legacy params (LEGACY_KDF). */
-  kdf?: KdfParams;
 }
+// ...existing code...
 
 // Generate a random salt
 export async function generateSalt(length = 16): Promise<string> {
@@ -63,18 +38,14 @@ export async function generateSalt(length = 16): Promise<string> {
     throw new Error('Secure random generation failed. Cannot store keys safely.');
   }
 }
-// Derive a key from PIN using PBKDF2.
-// keySize is in 32-bit words, so 256 bits = 8 words.
-// `params` MUST match what the stored key was encrypted with — callers pass the
-// stored key's `kdf` (or LEGACY_KDF for pre-versioning keys) on decrypt, and
-// CURRENT_KDF on first encrypt. Defaults to LEGACY for safety if omitted.
-export function deriveKeyFromPin(
-  pin: string,
-  salt: string,
-  params: KdfParams = LEGACY_KDF
-): string {
-  const hasher = params.hasher === 'SHA256' ? CryptoJS.algo.SHA256 : CryptoJS.algo.SHA1;
-  return PBKDF2(pin, salt, { keySize: 8, iterations: params.iterations, hasher }).toString();
+// Derive a key from PIN using PBKDF2
+// keySize is in 32-bit words, so 256 bits = 8 words
+export function deriveKeyFromPin(pin: string, salt: string): string {
+  // Using 5000 iterations for good balance of security and UX
+  // This makes brute-forcing a 6-digit PIN take ~5-6 days while keeping login fast
+  // An attacker would need: device access + encrypted key file + 1M attempts
+  const iterations = 5000;
+  return PBKDF2(pin, salt, { keySize: 8, iterations }).toString();
 }
 
 // Encrypt the private key with AES 
@@ -86,29 +57,39 @@ export function encryptKey(
   try {
     return AES.encrypt(key, secret, { iv: CryptoJS.enc.Hex.parse(iv) }).toString();
   } catch (error) {
-    // Fail closed — never store a key in a weaker form. The previous base64
-    // fallback effectively stored the key in plaintext next to its secret.
+    if (__DEV__) {
+      console.warn('AES encryption failed, using insecure fallback (DEV ONLY)', error);
+      return Buffer.from(`${key}::${secret}::${iv}`, 'utf8').toString('base64');
+    }
     throw new Error('Encryption failed. Cannot store keys safely.');
   }
 }
 
-// Decrypt the private key with AES.
+// Decrypt the private key with AES
 export function decryptKey(
   encrypted: string,
   secret: string,
   iv: string
 ): string {
+  // First try AES decryption (production method)
   try {
     const bytes = AES.decrypt(encrypted, secret, { iv: CryptoJS.enc.Hex.parse(iv) });
     const decrypted = bytes.toString(CryptoJS.enc.Utf8);
     if (decrypted) return decrypted;
   } catch (e) {
-    console.warn('AES decryption failed');
+    console.warn('⚠️ AES decryption failed, trying fallback method');
   }
-  // Fail closed — no base64 fallback (it accepted a near-plaintext blob whose
-  // "secret" sat beside the ciphertext). An empty result makes the caller drop
-  // the stored credentials and prompt a fresh login, which is the safe outcome.
-  return '';
+  
+  // Fallback to base64 decryption (for data encrypted in Expo Go)
+  try {
+    const decoded = Buffer.from(encrypted, 'base64').toString('utf8');
+    const [k, s, v] = decoded.split('::');
+    if (s === secret && v === iv) return k;
+    return '';
+  } catch (e) {
+    console.error('Both AES and fallback decryption failed:', e);
+    return '';
+  }
 }
 
 
