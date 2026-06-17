@@ -44,6 +44,30 @@ struct NextSpotIntent: AppIntent {
   }
 }
 
+// Sample content for the widget gallery / placeholder. WidgetKit renders these
+// before the app has pushed any real data, so the picker shows a lively widget
+// instead of the "NO SIGNAL" empty state. Sample-only — never shown once the app
+// has synced real spots. (Coords around Praça XV / Centro, Rio.)
+private func sampleSpots() -> [NearbySpot] {
+  [
+    NearbySpot(id: "sample-1", name: "Praça XV Ledges", lat: -22.9028, lng: -43.1731,
+               distanceKm: 0.4, author: "skatehive", source: "hive", thumbnail: nil, href: "/map"),
+    NearbySpot(id: "sample-2", name: "Museu do Amanhã Gap", lat: -22.8940, lng: -43.1796,
+               distanceKm: 1.1, author: nil, source: "google_my_maps", thumbnail: nil, href: "/map"),
+    NearbySpot(id: "sample-3", name: "Lapa Arches", lat: -22.9130, lng: -43.1790,
+               distanceKm: 1.8, author: "skatehive", source: "hive", thumbnail: nil, href: "/map"),
+    NearbySpot(id: "sample-4", name: "Cinelândia Banks", lat: -22.9100, lng: -43.1760,
+               distanceKm: 2.0, author: nil, source: "google_my_maps", thumbnail: nil, href: "/map"),
+    NearbySpot(id: "sample-5", name: "Aterro do Flamengo", lat: -22.9300, lng: -43.1700,
+               distanceKm: 3.2, author: "skatehive", source: "hive", thumbnail: nil, href: "/map"),
+  ]
+}
+
+private func samplePayload() -> WidgetPayload {
+  WidgetPayload(updatedAt: Date().timeIntervalSince1970,
+                userLat: -22.9028, userLng: -43.1731, spots: sampleSpots())
+}
+
 struct Provider: TimelineProvider {
   let variant: WidgetVariant
 
@@ -51,10 +75,40 @@ struct Provider: TimelineProvider {
     SpotEntry(date: Date(), payload: payload, snapshot: nil, thumbnails: [], selectedIndex: 0)
   }
 
-  func placeholder(in context: Context) -> SpotEntry { empty(nil) }
+  private func sampleEntry() -> SpotEntry {
+    SpotEntry(date: Date(), payload: samplePayload(), snapshot: nil, thumbnails: [], selectedIndex: 0)
+  }
+
+  // Redacted/loading placeholder — instant, no network. Sample content keeps it
+  // from flashing the empty state.
+  func placeholder(in context: Context) -> SpotEntry { sampleEntry() }
 
   func getSnapshot(in context: Context, completion: @escaping (SpotEntry) -> Void) {
-    completion(empty(loadPayload()))
+    let real = loadPayload()
+    if let real = real, !real.spots.isEmpty {
+      completion(empty(real)) // real synced data wins (e.g. post-sync snapshot)
+      return
+    }
+    guard context.isPreview else {
+      completion(empty(real)) // home-screen transient with no data yet
+      return
+    }
+    // Widget gallery preview, no real data: show rich sample content. For the
+    // map variant, render an actual snapshot so the picker shows a real map.
+    if variant == .map, let lat = samplePayload().userLat, let lng = samplePayload().userLng {
+      let payload = samplePayload()
+      Task {
+        let snap = await renderMapSnapshot(
+          center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+          spots: Array(payload.spots.prefix(12)),
+          size: CGSize(width: 380, height: 220)
+        )
+        completion(SpotEntry(date: Date(), payload: payload, snapshot: snap,
+                             thumbnails: [], selectedIndex: 0))
+      }
+    } else {
+      completion(sampleEntry())
+    }
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<SpotEntry>) -> Void) {
