@@ -14,7 +14,8 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { vote as hiveVote, submitEncryptedReport } from "~/lib/hive-utils";
+import { submitEncryptedReport } from "~/lib/hive-utils";
+import { canPost, castVote } from "~/lib/posting";
 import { useAuth } from "~/lib/auth-provider";
 import { useVoteValue } from "~/lib/hooks/useVoteValue";
 import { useViewportTracker } from "~/lib/ViewportTracker";
@@ -186,7 +187,7 @@ export const PostCard = React.memo(
       try {
         setIsVoting(true);
 
-        if (!session || !session.username || !session.decryptedKey) {
+        if (!session || !session.username || !canPost(session)) {
           showToast("Please login first", "error");
           return;
         }
@@ -227,9 +228,10 @@ export const PostCard = React.memo(
         }
 
         try {
-          await hiveVote(
-            session.decryptedKey,
-            session.username,
+          // Routes to the server for email (userbase) accounts, signs locally
+          // for classic Hive-key accounts.
+          await castVote(
+            session,
             post.author,
             post.permlink,
             previousLikedState ? 0 : Math.round(votePercentage * 100),
