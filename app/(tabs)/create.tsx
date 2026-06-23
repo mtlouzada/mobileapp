@@ -28,11 +28,11 @@ import {
 } from "~/lib/upload/video-upload";
 import {
   uploadImageToHive,
+  uploadImageViaUserbase,
   createImageMarkdown,
 } from "~/lib/upload/image-upload";
-import { createHiveComment } from "~/lib/upload/post-utils";
+import { canPost, isUserbaseSession, postComment } from "~/lib/posting";
 import {
-  SNAPS_CONTAINER_AUTHOR,
   COMMUNITY_TAG,
   getLastSnapsContainer,
 } from "~/lib/hive-utils";
@@ -177,8 +177,10 @@ export default function CreatePost() {
       return;
     }
 
-    // Check if user is authenticated
-    if (!username || username === "SPECTATOR" || !session?.decryptedKey) {
+    // Check if user is authenticated. Email (userbase) accounts are
+    // server-custody and have no local decryptedKey, so gate on canPost()
+    // rather than the presence of a local key.
+    if (!username || username === "SPECTATOR" || !session || !canPost(session)) {
       Alert.alert("Authentication Required", "Please log in to create a post");
       return;
     }
@@ -204,15 +206,19 @@ export default function CreatePost() {
           setUploadProgress("Uploading image...");
 
           try {
-            const imageResult = await uploadImageToHive(
-              media,
-              fileName,
-              mediaMimeType,
-              {
-                username,
-                privateKey: session.decryptedKey,
-              }
-            );
+            // Email (userbase) accounts have no local key to sign the Hive
+            // image challenge, so the server signs + uploads on their behalf.
+            const imageResult = isUserbaseSession(session)
+              ? await uploadImageViaUserbase(
+                  media,
+                  fileName,
+                  mediaMimeType,
+                  session.userbaseToken!
+                )
+              : await uploadImageToHive(media, fileName, mediaMimeType, {
+                  username,
+                  privateKey: session.decryptedKey,
+                });
 
             imageUrls.push(imageResult.url);
 
@@ -288,32 +294,28 @@ export default function CreatePost() {
         // Keep default values
       }
 
-      // Prepare comment data for console logging
-      const commentData = {
-        body: postBody,
+      // Build tags + metadata (community tag plus any hashtags in the body).
+      const bodyHashtags = (postBody.match(/#(\w+)/g) || []).map((h) =>
+        h.slice(1)
+      );
+      const tags = [COMMUNITY_TAG, ...bodyHashtags].filter(
+        (tag, index, array) => array.indexOf(tag) === index
+      );
+      const permlink = `sh-${new Date()
+        .toISOString()
+        .replace(/[^a-zA-Z0-9]/g, "")
+        .toLowerCase()
+        .substring(0, 15)}`;
+
+      // Post to blockchain via the unified seam: userbase (email) accounts are
+      // signed server-side via bearer token; classic key accounts sign locally.
+      await postComment(session, {
         parentAuthor,
         parentPermlink,
-        username,
-        images: imageUrls,
-        videos: videoUrls,
-        isSnapsPost: parentAuthor === SNAPS_CONTAINER_AUTHOR,
-        metadata: {
-          app: "mycommunity-mobile",
-          tags: [COMMUNITY_TAG, "...extracted hashtags"],
-        },
-      };
-
-      // Post to blockchain
-      await createHiveComment(
-        postBody,
-        parentAuthor, // Parent author for snaps container
-        parentPermlink, // Parent permlink for snaps container
-        {
-          username,
-          privateKey: session.decryptedKey,
-          communityTag: COMMUNITY_TAG, // Include community tag in metadata
-        }
-      );
+        body: postBody,
+        permlink,
+        jsonMetadata: { app: "mycommunity-mobile", tags },
+      });
 
       // Success
       showToast("Posted Successfully", "success");
