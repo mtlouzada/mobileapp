@@ -190,16 +190,7 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
 
     setSaving(true);
     try {
-      // Fetch current posting_json_metadata to merge
-      const [account] = await HiveClient.database.getAccounts([session.username]);
-      let existingProfile: Record<string, any> = {};
-      try {
-        const parsed = JSON.parse(account.posting_json_metadata || '{}');
-        existingProfile = parsed.profile || {};
-      } catch {}
-
-      const updatedProfile = {
-        ...existingProfile,
+      const formFields: Record<string, any> = {
         name: name.trim(),
         about: about.trim(),
         location: location.trim(),
@@ -207,6 +198,21 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
         profile_image: profileImage,
         version: 2,
       };
+
+      // Email (userbase) accounts: the server merges these fields over the
+      // current on-chain profile of the account it actually signs as, so we
+      // send only the form fields (session.username may not be that account).
+      // Classic key accounts sign locally, so merge the current profile here.
+      let updatedProfile = formFields;
+      if (!isUserbaseSession(session)) {
+        const [account] = await HiveClient.database.getAccounts([session.username]);
+        let existingProfile: Record<string, any> = {};
+        try {
+          const parsed = JSON.parse(account?.posting_json_metadata || '{}');
+          existingProfile = parsed.profile || {};
+        } catch {}
+        updatedProfile = { ...existingProfile, ...formFields };
+      }
 
       await updateProfile(session, updatedProfile);
 
