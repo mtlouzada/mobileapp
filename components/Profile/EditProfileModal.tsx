@@ -22,7 +22,7 @@ import { useToast } from '~/lib/toast-provider';
 import { HiveClient } from '~/lib/hive-utils';
 import { uploadImageToHive, uploadImageViaUserbase } from '~/lib/upload/image-upload';
 import { isUserbaseSession, updateProfile } from '~/lib/posting';
-import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle, eligibleForCrosspost } from '~/lib/instagram';
+import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle, hasEligibleHiveAccount } from '~/lib/instagram';
 import { InstagramHandleModal } from '~/components/Instagram/InstagramHandleModal';
 
 const COUNTRIES = [
@@ -125,23 +125,29 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
   const [website, setWebsite] = useState('');
   const [profileImage, setProfileImage] = useState('');
 
-  // Instagram handle (userbase-stored; classic Hive-key accounts only)
-  const igEligible = eligibleForCrosspost(session);
+  // Instagram handle — shown only for accounts with an eligible (>=100 HP) Hive
+  // account: key accounts, or email accounts with an eligible attached Hive.
+  const [igEligible, setIgEligible] = useState(false);
   const [instagramHandle, setInstagramHandle] = useState('');
   const [igModalVisible, setIgModalVisible] = useState(false);
   const [igSaving, setIgSaving] = useState(false);
 
   useEffect(() => {
-    if (!visible || !igEligible || !session) return;
+    if (!visible || !session) return;
     let cancelled = false;
     (async () => {
-      const { handle } = await getIgHandle(session);
-      if (!cancelled) setInstagramHandle(handle || '');
+      const ok = await hasEligibleHiveAccount(session);
+      if (cancelled) return;
+      setIgEligible(ok);
+      if (ok) {
+        const { handle } = await getIgHandle(session);
+        if (!cancelled) setInstagramHandle(handle || '');
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [visible, igEligible]);
+  }, [visible]);
 
   const saveInstagram = async (handle: string) => {
     if (!session) return setIgModalVisible(false);

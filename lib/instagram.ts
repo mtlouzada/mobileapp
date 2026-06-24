@@ -3,18 +3,38 @@ import { PrivateKey } from "@hiveio/dhive";
 import { Buffer } from "buffer";
 import { API_ORIGIN } from "./constants";
 import { HiveClient, convertVestToHive } from "./hive-utils";
+import { isUserbaseSession } from "./posting";
 import type { AuthSession } from "./types";
 
 // Client for the skatehive-api Instagram cross-post + IG-handle endpoints.
-// Auth is a per-request Hive posting-key signature (no session/cookie). The
-// server (api.skatehive.app) holds the Meta tokens and enforces the >=100 HP
-// gate, 7/24h cap, dedupe, and caption. Never log keys here.
+// Auth depends on the account kind:
+//   - classic Hive-key account → per-request posting-key SIGNATURE
+//   - email (userbase) account  → Bearer token (server resolves the linked Hive
+//     identity + HP-gates). Only userbase accounts with an ELIGIBLE attached
+//     Hive account (>=100 HP) can actually post — enforced by the HP check
+//     below + the server. Never log keys here.
 
 export const MIN_HP_TO_CROSSPOST = 100;
 
-/** Classic Hive-key account (has a local posting key to sign with). */
+/**
+ * Account TYPE can attempt a cross-post: a classic key account (can sign) OR a
+ * userbase account (can present a Bearer token). This does NOT mean they're
+ * eligible yet — use hasEligibleHiveAccount() for the real >=100 HP gate.
+ */
 export function eligibleForCrosspost(session: AuthSession | null | undefined): boolean {
-  return !!session && session.kind !== "userbase" && !!session.decryptedKey && session.username !== "SPECTATOR";
+  if (!session || session.username === "SPECTATOR") return false;
+  return !!session.decryptedKey || isUserbaseSession(session);
+}
+
+/**
+ * True only when the account has an eligible (>=100 HP) Hive account it can post
+ * as — i.e. a key account with HP, or a userbase account whose attached Hive
+ * account has HP. (For lite userbase accounts whose handle isn't a real on-chain
+ * account, getHivePower returns 0, so they're correctly excluded.)
+ */
+export async function hasEligibleHiveAccount(session: AuthSession | null | undefined): Promise<boolean> {
+  if (!eligibleForCrosspost(session)) return false;
+  return (await getHivePower(session!.username)) >= MIN_HP_TO_CROSSPOST;
 }
 
 // Sign sha256(message) with the posting key — matches the server's
@@ -42,10 +62,20 @@ function buildIgHandleAuthMessage(hiveAuthor: string, issuedAt: string): string 
   ].join("\n");
 }
 
-function handleSig(session: AuthSession): { hive_author: string; hive_public_key: string; hive_signature: string; signed_at: string } {
+/**
+ * Auth material for the IG-handle endpoints. Userbase → Bearer header (server
+ * resolves the user); key account → signature fields over the handle message.
+ */
+function handleAuth(session: AuthSession): { headers: Record<string, string>; sig: Record<string, string> } {
+  if (isUserbaseSession(session)) {
+    return { headers: { Authorization: `Bearer ${session.userbaseToken}` }, sig: {} };
+  }
   const issuedAt = new Date().toISOString();
   const { signature, publicKey } = signMessage(buildIgHandleAuthMessage(session.username, issuedAt), session.decryptedKey);
-  return { hive_author: session.username, hive_public_key: publicKey, hive_signature: signature, signed_at: issuedAt };
+  return {
+    headers: {},
+    sig: { hive_author: session.username, hive_public_key: publicKey, hive_signature: signature, signed_at: issuedAt },
+  };
 }
 
 export interface CrossPostArgs {
@@ -62,26 +92,32 @@ export async function crossPostToInstagram(
   session: AuthSession,
   args: CrossPostArgs
 ): Promise<{ ig_permalink?: string; deduped?: boolean }> {
-  const issuedAt = new Date().toISOString();
-  const { signature, publicKey } = signMessage(
-    buildIgAuthMessage(session.username, args.permlink, issuedAt),
-    session.decryptedKey
-  );
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const payload: Record<string, unknown> = {
+    hive_author: session.username,
+    hive_permlink: args.permlink,
+    body: args.body,
+    tags: args.tags ?? [],
+    image_url: args.imageUrl,
+    video_url: args.videoUrl,
+    permalink_url: args.permalinkUrl,
+  };
+  if (isUserbaseSession(session)) {
+    headers.Authorization = `Bearer ${session.userbaseToken}`;
+  } else {
+    const issuedAt = new Date().toISOString();
+    const { signature, publicKey } = signMessage(
+      buildIgAuthMessage(session.username, args.permlink, issuedAt),
+      session.decryptedKey
+    );
+    payload.hive_signature = signature;
+    payload.hive_public_key = publicKey;
+    payload.signed_at = issuedAt;
+  }
   const res = await fetch(`${API_ORIGIN}/api/instagram/post`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      hive_author: session.username,
-      hive_permlink: args.permlink,
-      body: args.body,
-      tags: args.tags ?? [],
-      image_url: args.imageUrl,
-      video_url: args.videoUrl,
-      permalink_url: args.permalinkUrl,
-      hive_signature: signature,
-      hive_public_key: publicKey,
-      signed_at: issuedAt,
-    }),
+    headers,
+    body: JSON.stringify(payload),
   });
   const data = (await res.json().catch(() => ({}))) as { error?: string; ig_permalink?: string; deduped?: boolean };
   if (!res.ok) throw new Error(data?.error || `Cross-post failed (${res.status})`);
@@ -95,18 +131,21 @@ export interface IgHandleResult {
 
 /** Read the user's stored IG handle. `source === null` means none set (prompt). */
 export async function getIgHandle(session: AuthSession): Promise<IgHandleResult> {
-  const q = new URLSearchParams(handleSig(session) as Record<string, string>);
-  const res = await fetch(`${API_ORIGIN}/api/userbase/profile/instagram?${q.toString()}`);
+  const { headers, sig } = handleAuth(session);
+  const q = new URLSearchParams(sig).toString();
+  const url = `${API_ORIGIN}/api/userbase/profile/instagram${q ? `?${q}` : ""}`;
+  const res = await fetch(url, { headers });
   if (!res.ok) return { handle: null, source: null };
   return (await res.json().catch(() => ({ handle: null, source: null }))) as IgHandleResult;
 }
 
 /** Store/replace the user's IG handle. Throws on failure (e.g. handle taken). */
 export async function setIgHandle(handle: string, session: AuthSession): Promise<void> {
+  const { headers, sig } = handleAuth(session);
   const res = await fetch(`${API_ORIGIN}/api/userbase/profile/instagram`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ handle, ...handleSig(session) }),
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify({ handle, ...sig }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -115,10 +154,11 @@ export async function setIgHandle(handle: string, session: AuthSession): Promise
 }
 
 export async function deleteIgHandle(session: AuthSession): Promise<void> {
+  const { headers, sig } = handleAuth(session);
   await fetch(`${API_ORIGIN}/api/userbase/profile/instagram`, {
     method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(handleSig(session)),
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(sig),
   });
 }
 

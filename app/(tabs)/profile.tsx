@@ -22,7 +22,7 @@ import { LoadingScreen } from "~/components/ui/LoadingScreen";
 import { FollowersModal } from "~/components/Profile/FollowersModal";
 import { EditProfileModal } from "~/components/Profile/EditProfileModal";
 import { InstagramHandleModal } from "~/components/Instagram/InstagramHandleModal";
-import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle, eligibleForCrosspost } from "~/lib/instagram";
+import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle, hasEligibleHiveAccount } from "~/lib/instagram";
 import { useToast } from "~/lib/toast-provider";
 import { theme } from "~/lib/theme";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
@@ -114,11 +114,21 @@ export default function ProfileScreen() {
   const [followersModalVisible, setFollowersModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
-  // Instagram handle management (classic Hive-key accounts only)
-  const igEligible = eligibleForCrosspost(session);
+  // Instagram handle management — only for accounts with an eligible (>=100 HP)
+  // Hive account (key accounts, or email accounts with an eligible attached Hive).
+  const [igEligible, setIgEligible] = useState(false);
   const [igModalVisible, setIgModalVisible] = useState(false);
   const [igHandle, setIgHandleState] = useState("");
   const [igSaving, setIgSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    hasEligibleHiveAccount(session).then((ok) => {
+      if (!cancelled) setIgEligible(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.username]);
   const [modalType, setModalType] = useState<'followers' | 'following' | 'muted'>('followers');
   const [profileTab, setProfileTab] = useState<'grid' | 'posts'>('grid');
   const [visibleGridItems, setVisibleGridItems] = useState<Set<string>>(new Set());
