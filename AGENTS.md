@@ -152,8 +152,9 @@ eas build --platform android --profile production
 ```
 
 ## API Dependencies
-- `https://api.skatehive.app/api/v1` — SkateHive backend
-- `https://api.skatehive.app/api/v2/leaderboard` — Leaderboard data
+- `https://api.skatehive.app/api/v2` — SkateHive backend (feed, profile, balance, leaderboard, etc.). The app uses v2; v1 is deprecated.
+- `https://api.skatehive.app/api/userbase/*` — server-custody auth + Hive actions for email/lite accounts
+- `https://api.skatehive.app/api/instagram/post` + `/api/userbase/profile/instagram` — Instagram cross-post + handle (signature-auth)
 - `https://api.skatehive.app/api/transcode/status` — Video transcoding service
 - `https://images.hive.blog` — HIVE image CDN
 - HIVE RPC nodes (multiple, with failover)
