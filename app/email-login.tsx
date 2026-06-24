@@ -12,7 +12,11 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { theme } from "~/lib/theme";
+
+// Celebratory clip shown on the "You're in" success screen.
+const CELEBRATION = require("../assets/animations/youre-in.mp4");
 import {
   requestOtp,
   verifyOtp,
@@ -37,6 +41,13 @@ export default function EmailLoginScreen() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Looping muted celebration clip for the success screen.
+  const celebrationPlayer = useVideoPlayer(CELEBRATION, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.play();
+  });
 
   // Live username availability
   const [checking, setChecking] = useState(false);
@@ -216,10 +227,23 @@ export default function EmailLoginScreen() {
 
           {step === "done" && (
             <View style={styles.doneBox}>
-              <Ionicons name="checkmark-circle" size={56} color={theme.colors.primary} />
+              <VideoView
+                player={celebrationPlayer}
+                style={styles.celebration}
+                contentFit="contain"
+                nativeControls={false}
+              />
               <Text style={styles.doneTitle}>You're in</Text>
               <Text style={styles.emailEcho}>@{user?.handle}</Text>
-              <PrimaryButton label="Continue" onPress={() => router.replace("/(tabs)/videos")} busy={false} />
+              <Pressable
+                style={styles.continueBtn}
+                onPress={() => router.replace("/(tabs)/videos")}
+                accessibilityRole="button"
+                accessibilityLabel="Continue"
+              >
+                <Text style={styles.continueText}>Continue</Text>
+                <Ionicons name="arrow-forward" size={18} color="#000" />
+              </Pressable>
             </View>
           )}
 
@@ -295,5 +319,33 @@ const styles = StyleSheet.create({
   linkText: { color: theme.colors.primary, fontFamily: theme.fonts.regular, fontSize: theme.fontSizes.sm, textAlign: "center", marginTop: theme.spacing.md },
   errorText: { color: theme.colors.danger, fontFamily: theme.fonts.regular, fontSize: theme.fontSizes.sm, marginTop: theme.spacing.md, textAlign: "center" },
   doneBox: { alignItems: "center", gap: theme.spacing.sm, paddingTop: theme.spacing.xl },
-  doneTitle: { color: theme.colors.text, fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.lg },
+  doneTitle: { color: theme.colors.primary, fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.xxl },
+  celebration: {
+    width: 220,
+    height: 220,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: "transparent",
+  },
+  continueBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: theme.spacing.sm,
+    backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xl,
+    borderRadius: theme.borderRadius.full,
+    marginTop: theme.spacing.lg,
+    minWidth: 200,
+    shadowColor: theme.colors.primary,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  continueText: {
+    color: "#000",
+    fontFamily: theme.fonts.bold,
+    fontSize: theme.fontSizes.md,
+    letterSpacing: 0.5,
+  },
 });
