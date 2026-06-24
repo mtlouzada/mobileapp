@@ -14,6 +14,7 @@ import { ActivityIndicator } from "react-native";
 import { useAuth } from "~/lib/auth-provider";
 import { useSnaps } from "~/lib/hooks/useSnaps";
 import { isDeletedPost } from "~/lib/utils";
+import { isHiddenByModeration } from "~/lib/moderation";
 import { theme } from "~/lib/theme";
 import {
   ViewportTrackerProvider,
@@ -85,8 +86,9 @@ function FeedContent({ refreshTrigger, onRefresh }: FeedProps) {
     if (!comments || comments.length === 0) return [];
 
     return comments.filter((post) => {
-      // Deleted/tombstoned posts never show, even your own.
+      // Deleted/tombstoned and admin-moderated posts never show, even your own.
       if (isDeletedPost(post)) return false;
+      if (isHiddenByModeration(post)) return false;
 
       // Don't filter out the user's own posts
       if (post.author === username) return true;

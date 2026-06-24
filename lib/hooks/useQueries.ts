@@ -6,6 +6,7 @@ import {
   getVideoFeed } from '../api';
 import { API_BASE_URL, LEADERBOARD_API_URL, HIVE_AVATAR_URL } from '../constants';
 import { extractMediaFromBody, filterDeletedPosts } from '../utils';
+import { filterModeratedPosts } from '../moderation';
 import type { Post } from '../types';
 
 // ============================================================================
@@ -80,12 +81,14 @@ async function fetchVideoFeed(): Promise<VideoPost[]> {
       ...entry,
       username: entry.author,
     }));
-    return filterDeletedPosts(mapped);
+    return filterModeratedPosts(filterDeletedPosts(mapped));
   }
 
   // Fallback: use general feed + client-side extraction
   const posts = await getFeed(1, 50);
-  return filterDeletedPosts(extractVideosFromFeed(filterDeletedPosts(posts)));
+  return filterModeratedPosts(
+    filterDeletedPosts(extractVideosFromFeed(filterDeletedPosts(posts)))
+  );
 }
 
 export function useVideoFeed() {
