@@ -123,3 +123,39 @@ export function comment(
 ): Promise<{ success: boolean; author?: string; permlink?: string; error?: string }> {
   return postJson("/hive/comment", args, token);
 }
+
+// Account-scoped actions below. The server signs with the user's OWN stored key
+// and rejects lite accounts on the shared @skateuser key with HTTP 403 +
+// code "REQUIRES_OWN_HIVE_ACCOUNT" — you can't follow/edit/report on an account
+// you don't own.
+
+export interface FollowArgs {
+  following: string;
+  type?: "blog" | "ignore" | "blacklist" | "";
+}
+export function follow(
+  token: string,
+  args: FollowArgs
+): Promise<{ success: boolean; error?: string; code?: string }> {
+  return postJson("/hive/follow", args, token);
+}
+
+export interface AccountUpdateArgs {
+  profile: Record<string, unknown>;
+}
+export function accountUpdate(
+  token: string,
+  args: AccountUpdateArgs
+): Promise<{ success: boolean; author?: string; error?: string; code?: string }> {
+  return postJson("/hive/account-update", args, token);
+}
+
+export interface ReportArgs {
+  payload: unknown;
+}
+export function report(
+  token: string,
+  args: ReportArgs
+): Promise<{ success: boolean; error?: string; code?: string }> {
+  return postJson("/hive/report", args, token);
+}

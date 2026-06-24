@@ -13,7 +13,8 @@ import { FontAwesome } from '@expo/vector-icons';
 import { HIVE_AVATAR_URL } from '~/lib/constants';
 import { Text } from '../ui/text';
 import { theme } from '~/lib/theme';
-import { getFollowing, getFollowers, getMuted, setUserRelationship } from '~/lib/hive-utils';
+import { getFollowing, getFollowers, getMuted } from '~/lib/hive-utils';
+import { canPost, setRelationship } from '~/lib/posting';
 import { useAuth } from '~/lib/auth-provider';
 
 interface FollowersModalProps {
@@ -133,15 +134,16 @@ export const FollowersModal: React.FC<FollowersModalProps> = ({
   };
 
   const handleUnmute = async (targetUsername: string) => {
-    if (!session?.decryptedKey || !currentUsername) {
+    if (!session || !canPost(session) || !currentUsername) {
       console.error('No authenticated session found');
       return;
     }
 
     try {
-      // Remove from muted list by setting relationship to empty string
-      await setUserRelationship(session.decryptedKey, currentUsername, targetUsername, '');
-      
+      // Remove from muted list by setting relationship to empty string.
+      // Routes to the server for email accounts, signs locally otherwise.
+      await setRelationship(session, targetUsername, '');
+
       // Remove from local state
       setUsers(prevUsers => prevUsers.filter(user => user !== targetUsername));
     } catch (error) {

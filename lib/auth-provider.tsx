@@ -25,8 +25,8 @@ import {
 } from './secure-key';
 import {
   getUserRelationshipList,
-  setUserRelationship
 } from './hive-utils';
+import { canPost, setRelationship } from './posting';
 import type { UserbaseUser } from './userbase/api';
 import { logout as userbaseLogout } from './userbase/api';
 import {
@@ -84,7 +84,7 @@ interface AuthContextType {
   deleteAllStoredUsers: () => Promise<void>;
   deleteStoredUser: (username: string) => Promise<void>;
   resetInactivityTimer: () => void;
-  updateUserRelationship: (targetUsername: string, relationship: 'blog' | 'ignore' | 'blacklist' | '') => Promise<boolean>;
+  updateUserRelationship: (targetUsername: string, relationship: 'blog' | 'ignore' | 'blacklist' | '') => Promise<void>;
   refreshUserRelationships: () => Promise<void>;
 }
 
@@ -200,39 +200,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateUserRelationship = async (
     targetUsername: string,
     relationship: 'blog' | 'ignore' | 'blacklist' | ''
-  ): Promise<boolean> => {
-    if (!session || !session.username || !session.decryptedKey || session.username === 'SPECTATOR') {
-      return false;
+  ): Promise<void> => {
+    if (!session || !canPost(session)) {
+      throw new Error('Please log in first');
     }
 
-    try {
-      const success = await setUserRelationship(
-        session.decryptedKey,
-        session.username,
-        targetUsername,
-        relationship
-      );
+    // Routes to the server for email (userbase) accounts, signs locally for
+    // classic key accounts. Throws on failure (callers surface the message).
+    await setRelationship(session, targetUsername, relationship);
 
-      if (success) {
-        // Update local state immediately for better UX
-        if (relationship === 'blog') {
-          setFollowingList(prev => [...prev.filter(u => u !== targetUsername), targetUsername]);
-        } else if (relationship === 'ignore') {
-          setMutedList(prev => [...prev.filter(u => u !== targetUsername), targetUsername]);
-          setFollowingList(prev => prev.filter(u => u !== targetUsername));
-        } else if (relationship === 'blacklist') {
-          setBlacklistedList(prev => [...prev.filter(u => u !== targetUsername), targetUsername]);
-          setFollowingList(prev => prev.filter(u => u !== targetUsername));
-        } else if (relationship === '') {
-          // Unfollow
-          setFollowingList(prev => prev.filter(u => u !== targetUsername));
-        }
-      }
-
-      return success;
-    } catch (error) {
-      console.error('Error updating user relationship:', error);
-      return false;
+    // Update local state immediately for better UX
+    if (relationship === 'blog') {
+      setFollowingList(prev => [...prev.filter(u => u !== targetUsername), targetUsername]);
+    } else if (relationship === 'ignore') {
+      setMutedList(prev => [...prev.filter(u => u !== targetUsername), targetUsername]);
+      setFollowingList(prev => prev.filter(u => u !== targetUsername));
+    } else if (relationship === 'blacklist') {
+      setBlacklistedList(prev => [...prev.filter(u => u !== targetUsername), targetUsername]);
+      setFollowingList(prev => prev.filter(u => u !== targetUsername));
+    } else if (relationship === '') {
+      // Unfollow
+      setFollowingList(prev => prev.filter(u => u !== targetUsername));
     }
   };
 

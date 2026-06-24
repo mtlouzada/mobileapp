@@ -1,6 +1,19 @@
 import type { AuthSession } from "./types";
-import { vote as hiveVote, comment as hiveComment } from "./hive-utils";
-import { vote as ubVote, comment as ubComment } from "./userbase/api";
+import {
+  vote as hiveVote,
+  comment as hiveComment,
+  setUserRelationship as hiveSetRelationship,
+  updateProfile as hiveUpdateProfile,
+  submitEncryptedReport as hiveSubmitReport,
+  buildEncryptedReportPayload,
+} from "./hive-utils";
+import {
+  vote as ubVote,
+  comment as ubComment,
+  follow as ubFollow,
+  accountUpdate as ubAccountUpdate,
+  report as ubReport,
+} from "./userbase/api";
 
 // Unified posting seam. Server-custody email (userbase) accounts route to the
 // api.skatehive.app endpoints (server signs); classic Hive-key accounts sign
@@ -67,4 +80,71 @@ export async function postComment(
     args.jsonMetadata || {}
   );
   return { author: session.username, permlink };
+}
+
+// Account-scoped actions (follow/mute, profile, report). For userbase accounts
+// these route to the server, which signs with the user's own key and rejects
+// shared @skateuser (lite) accounts with a clear "requires your own Hive
+// account" message. Each throws on failure so callers can surface the message.
+
+export async function setRelationship(
+  session: AuthSession,
+  following: string,
+  type: "blog" | "ignore" | "blacklist" | ""
+): Promise<void> {
+  if (isUserbaseSession(session)) {
+    const r = await ubFollow(session.userbaseToken!, { following, type });
+    if (!r.success) throw new Error(r.error || "Action failed");
+    return;
+  }
+  const ok = await hiveSetRelationship(
+    session.decryptedKey,
+    session.username,
+    following,
+    type
+  );
+  if (!ok) throw new Error("Action failed");
+}
+
+export async function updateProfile(
+  session: AuthSession,
+  profile: Record<string, unknown>
+): Promise<void> {
+  if (isUserbaseSession(session)) {
+    const r = await ubAccountUpdate(session.userbaseToken!, { profile });
+    if (!r.success) throw new Error(r.error || "Profile update failed");
+    return;
+  }
+  await hiveUpdateProfile(session.decryptedKey, session.username, profile);
+}
+
+export async function submitReport(
+  session: AuthSession,
+  args: {
+    reportedAuthor: string;
+    reportedPermlink: string;
+    reason: string;
+    additionalInfo?: string;
+  }
+): Promise<void> {
+  if (isUserbaseSession(session)) {
+    const payload = buildEncryptedReportPayload(
+      session.username,
+      args.reportedAuthor,
+      args.reportedPermlink,
+      args.reason,
+      args.additionalInfo
+    );
+    const r = await ubReport(session.userbaseToken!, { payload });
+    if (!r.success) throw new Error(r.error || "Report failed");
+    return;
+  }
+  await hiveSubmitReport(
+    session.decryptedKey,
+    session.username,
+    args.reportedAuthor,
+    args.reportedPermlink,
+    args.reason,
+    args.additionalInfo
+  );
 }

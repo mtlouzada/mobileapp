@@ -14,8 +14,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { router } from "expo-router";
-import { submitEncryptedReport } from "~/lib/hive-utils";
-import { canPost, castVote } from "~/lib/posting";
+import { canPost, castVote, submitReport } from "~/lib/posting";
 import { useAuth } from "~/lib/auth-provider";
 import { useVoteValue } from "~/lib/hooks/useVoteValue";
 import { useViewportTracker } from "~/lib/ViewportTracker";
@@ -314,14 +313,13 @@ export const PostCard = React.memo(
             break;
         }
 
-        const success = await updateUserRelationship(post.author, relationship);
-        if (success) {
-          showToast(successMessage, "success");
-        } else {
-          showToast("Failed to update relationship", "error");
-        }
+        await updateUserRelationship(post.author, relationship);
+        showToast(successMessage, "success");
       } catch (error) {
-        showToast("Failed to update relationship", "error");
+        showToast(
+          error instanceof Error ? error.message : "Failed to update relationship",
+          "error",
+        );
       } finally {
         setShowUserMenu(false);
       }
@@ -338,11 +336,7 @@ export const PostCard = React.memo(
         return;
       }
 
-      if (
-        !session ||
-        session.username === "SPECTATOR" ||
-        !session.decryptedKey
-      ) {
+      if (!session || !canPost(session)) {
         showToast("Please login first", "error");
         return;
       }
@@ -350,23 +344,19 @@ export const PostCard = React.memo(
       try {
         setIsSubmittingReport(true);
 
-        const success = await submitEncryptedReport(
-          session.decryptedKey,
-          session.username,
-          post.author,
-          post.permlink,
-          selectedReportReason,
-          reportAdditionalInfo,
-        );
+        // Routes to the server for email (userbase) accounts, signs locally for
+        // classic key accounts. Throws on failure.
+        await submitReport(session, {
+          reportedAuthor: post.author,
+          reportedPermlink: post.permlink,
+          reason: selectedReportReason,
+          additionalInfo: reportAdditionalInfo,
+        });
 
-        if (success) {
-          showToast("Report submitted successfully", "success");
-          setShowReportModal(false);
-          setSelectedReportReason("");
-          setReportAdditionalInfo("");
-        } else {
-          showToast("Failed to submit report", "error");
-        }
+        showToast("Report submitted successfully", "success");
+        setShowReportModal(false);
+        setSelectedReportReason("");
+        setReportAdditionalInfo("");
       } catch (error) {
         let errorMessage = "Failed to submit report";
         if (error instanceof Error) {

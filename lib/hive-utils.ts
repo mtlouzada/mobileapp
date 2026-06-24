@@ -1055,6 +1055,45 @@ export function decryptFromPrivateKey(encryptedData: string, privateKey: string)
 }
 
 /**
+ * Build the encrypted custom_json payload for a moderation report. Shared by the
+ * local-signing path (submitEncryptedReport) and the server-custody path
+ * (lib/posting.ts → userbase /hive/report), so the on-chain shape is identical.
+ */
+export function buildEncryptedReportPayload(
+  reporter: string,
+  reportedAuthor: string,
+  reportedPermlink: string,
+  reason: string,
+  additionalInfo?: string
+): { encrypted: boolean; data: string; version: number; encryption_method: string } {
+  if (!MODERATOR_PUBLIC_KEY) {
+    throw new Error('Report system not configured - missing moderator public key');
+  }
+
+  const reportData = {
+    type: 'post_report',
+    reported_author: reportedAuthor,
+    reported_permlink: reportedPermlink,
+    reason: reason,
+    additional_info: additionalInfo || '',
+    timestamp: new Date().toISOString(),
+    reporter: reporter,
+    app: 'skatehive_mobile',
+    version: '1.0',
+  };
+
+  // Encrypt the report data for the moderator
+  const encryptedData = encryptForPublicKey(reportData, MODERATOR_PUBLIC_KEY);
+
+  return {
+    encrypted: true,
+    data: encryptedData,
+    version: 1,
+    encryption_method: 'hive_ecdh',
+  };
+}
+
+/**
  * Submit an encrypted report for a post or user
  * @param privateKey - Reporter's posting private key (WIF)
  * @param reporter - The username submitting the report
@@ -1075,31 +1114,13 @@ export async function submitEncryptedReport(
   additionalInfo?: string
 ): Promise<boolean> {
   try {
-    if (!MODERATOR_PUBLIC_KEY) {
-      throw new Error('Report system not configured - missing moderator public key');
-    }
-    
-    const reportData = {
-      type: 'post_report',
-      reported_author: reportedAuthor,
-      reported_permlink: reportedPermlink,
-      reason: reason,
-      additional_info: additionalInfo || '',
-      timestamp: new Date().toISOString(),
-      reporter: reporter,
-      app: 'skatehive_mobile',
-      version: '1.0'
-    };
-
-    // Encrypt the report data for the moderator
-    const encryptedData = encryptForPublicKey(reportData, MODERATOR_PUBLIC_KEY);
-
-    const customJsonData = {
-      encrypted: true,
-      data: encryptedData,
-      version: 1,
-      encryption_method: 'hive_ecdh'
-    };
+    const customJsonData = buildEncryptedReportPayload(
+      reporter,
+      reportedAuthor,
+      reportedPermlink,
+      reason,
+      additionalInfo
+    );
 
     const operation: any = [
       'custom_json',

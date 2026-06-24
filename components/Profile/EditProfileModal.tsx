@@ -19,8 +19,9 @@ import { Input } from '~/components/ui/input';
 import { theme } from '~/lib/theme';
 import { useAuth } from '~/lib/auth-provider';
 import { useToast } from '~/lib/toast-provider';
-import { HiveClient, updateProfile } from '~/lib/hive-utils';
-import { uploadImageToHive } from '~/lib/upload/image-upload';
+import { HiveClient } from '~/lib/hive-utils';
+import { uploadImageToHive, uploadImageViaUserbase } from '~/lib/upload/image-upload';
+import { isUserbaseSession, updateProfile } from '~/lib/posting';
 
 const COUNTRIES = [
   { code: 'AR', name: 'Argentina', flag: '🇦🇷' },
@@ -159,12 +160,21 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
     setUploadingAvatar(true);
 
     try {
-      const uploaded = await uploadImageToHive(
-        asset.uri,
-        asset.fileName || 'avatar.jpg',
-        asset.mimeType || 'image/jpeg',
-        { username: session.username, privateKey: session.decryptedKey },
-      );
+      // Email (userbase) accounts have no local key to sign the image
+      // challenge, so the server signs + uploads on their behalf.
+      const uploaded = isUserbaseSession(session)
+        ? await uploadImageViaUserbase(
+            asset.uri,
+            asset.fileName || 'avatar.jpg',
+            asset.mimeType || 'image/jpeg',
+            session.userbaseToken!,
+          )
+        : await uploadImageToHive(
+            asset.uri,
+            asset.fileName || 'avatar.jpg',
+            asset.mimeType || 'image/jpeg',
+            { username: session.username, privateKey: session.decryptedKey },
+          );
       setProfileImage(uploaded.url);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
@@ -198,7 +208,7 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
         version: 2,
       };
 
-      await updateProfile(session.decryptedKey, session.username, updatedProfile);
+      await updateProfile(session, updatedProfile);
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       showToast('Profile updated!', 'success');
