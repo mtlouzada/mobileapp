@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import MapView, { PROVIDER_DEFAULT, Marker, type Region } from "react-native-maps";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { Text } from "~/components/ui/text";
 import { useAuth } from "~/lib/auth-provider";
@@ -54,6 +55,7 @@ export default function SpotCreateScreen() {
   const { username, session } = useAuth();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const insets = useSafeAreaInsets();
   // ?camera=1 (from the Home Screen "Add Spot" widget) auto-opens the camera.
   const params = useLocalSearchParams<{ camera?: string }>();
   const cameraAutoOpenedRef = useRef(false);
@@ -280,7 +282,7 @@ export default function SpotCreateScreen() {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + theme.spacing.sm }]}>
         <Pressable
           onPress={() => router.back()}
           hitSlop={12}

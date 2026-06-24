@@ -31,6 +31,7 @@ import { useUserComments } from "~/lib/hooks/useUserComments";
 import { extractMediaFromBody } from "~/lib/utils";
 import { Image } from "expo-image";
 import { GridVideoTile } from "~/components/Profile/GridVideoTile";
+import { ImmersivePostViewer } from "~/components/Feed/ImmersivePostViewer";
 
 const GRID_COLS = 3;
 const GRID_GAP = 2;
@@ -131,6 +132,8 @@ export default function ProfileScreen() {
   }, [session?.username]);
   const [modalType, setModalType] = useState<'followers' | 'following' | 'muted'>('followers');
   const [profileTab, setProfileTab] = useState<'grid' | 'posts'>('grid');
+  // Index (within gridPosts) of the post open in the immersive viewer; null = closed.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [visibleGridItems, setVisibleGridItems] = useState<Set<string>>(new Set());
   // Budget for automatic page fetches that fill the grid (see auto-fill effect)
   const autoFillPagesRef = useRef(0);
@@ -265,12 +268,15 @@ export default function ProfileScreen() {
   // Render grid item
   const tileSize = (SCREEN_WIDTH - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
 
-  const renderGridItem = useCallback(({ item }: { item: any }) => {
+  const renderGridItem = useCallback(({ item, index }: { item: any; index: number }) => {
     if (!item?.body) {
       return <View style={[styles.gridTile, { width: tileSize, height: tileSize }]} />;
     }
     const media = extractMediaFromBody(item.body);
     const videoMedia = media.find((m: any) => m.type === 'video');
+
+    // Tapping any tile opens the immersive post viewer at that post.
+    const openViewer = () => setViewerIndex(index);
 
     // Video posts autoplay muted when in view (event-driven via onViewableItemsChanged)
     if (videoMedia) {
@@ -279,7 +285,7 @@ export default function ProfileScreen() {
           videoUrl={videoMedia.url}
           size={tileSize}
           isVisible={visibleGridItems.has(item.permlink)}
-          onPress={() => router.push({ pathname: '/conversation', params: { author: item.author, permlink: item.permlink } })}
+          onPress={openViewer}
         />
       );
     }
@@ -289,7 +295,7 @@ export default function ProfileScreen() {
     return (
       <Pressable
         style={[styles.gridTile, { width: tileSize, height: tileSize }]}
-        onPress={() => router.push({ pathname: '/conversation', params: { author: item.author, permlink: item.permlink } })}
+        onPress={openViewer}
       >
         {thumb ? (
           <Image
@@ -694,6 +700,18 @@ export default function ProfileScreen() {
           maxToRenderPerBatch={3}
           windowSize={7}
           contentContainerStyle={styles.contentContainer}
+        />
+      )}
+
+      {/* Immersive post viewer — opens on the tapped grid post, swipe for more */}
+      {viewerIndex !== null && (
+        <ImmersivePostViewer
+          visible={viewerIndex !== null}
+          posts={gridPosts}
+          initialIndex={viewerIndex}
+          hasMore={hasMore}
+          onLoadMore={loadNextPage}
+          onClose={() => setViewerIndex(null)}
         />
       )}
 
