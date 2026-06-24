@@ -4,10 +4,12 @@ export const STORED_USERS_KEY = 'myc_users';
 export const API_BASE_URL = 'https://api.skatehive.app/api/v2';
 export const LEADERBOARD_API_URL = 'https://api.skatehive.app/api/v2/leaderboard';
 export const HIVE_AVATAR_URL = 'https://images.hive.blog/u';
-// skatehive3.0 web app — hosts the Instagram cross-post + userbase bootstrap/
-// profile endpoints (which hold the Meta tokens). Mobile authenticates to it
-// with a bootstrapped userbase session token sent as a Cookie header.
+// skatehive3.0 web app — used only for canonical post permalinks in captions.
 export const WEB_BASE_URL = 'https://skatehive.app';
+// api.skatehive.app origin — hosts the Instagram cross-post + IG-handle
+// endpoints (Meta tokens live here now). Not behind the web bot-firewall.
+// Mobile authenticates per-request with a Hive posting-key signature.
+export const API_ORIGIN = 'https://api.skatehive.app';
 
 export const NAV_THEME = {
   light: {

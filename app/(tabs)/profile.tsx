@@ -22,9 +22,7 @@ import { LoadingScreen } from "~/components/ui/LoadingScreen";
 import { FollowersModal } from "~/components/Profile/FollowersModal";
 import { EditProfileModal } from "~/components/Profile/EditProfileModal";
 import { InstagramHandleModal } from "~/components/Instagram/InstagramHandleModal";
-import { isUserbaseSession } from "~/lib/posting";
-import { getUserbaseCookieHeader } from "~/lib/userbase/hiveSession";
-import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle } from "~/lib/instagram";
+import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle, eligibleForCrosspost } from "~/lib/instagram";
 import { useToast } from "~/lib/toast-provider";
 import { theme } from "~/lib/theme";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
@@ -117,11 +115,10 @@ export default function ProfileScreen() {
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   // Instagram handle management (classic Hive-key accounts only)
-  const igEligible = !!session && !isUserbaseSession(session) && !!session.decryptedKey;
+  const igEligible = eligibleForCrosspost(session);
   const [igModalVisible, setIgModalVisible] = useState(false);
   const [igHandle, setIgHandleState] = useState("");
   const [igSaving, setIgSaving] = useState(false);
-  const igCookieRef = useRef<Record<string, string> | null>(null);
   const [modalType, setModalType] = useState<'followers' | 'following' | 'muted'>('followers');
   const [profileTab, setProfileTab] = useState<'grid' | 'posts'>('grid');
   const [visibleGridItems, setVisibleGridItems] = useState<Set<string>>(new Set());
@@ -311,19 +308,17 @@ export default function ProfileScreen() {
   const openInstagramSettings = async () => {
     setSettingsMenuVisible(false);
     setIgModalVisible(true);
-    const cookie = await getUserbaseCookieHeader(session);
-    igCookieRef.current = cookie;
-    if (cookie) {
-      const { handle } = await getIgHandle(cookie);
+    if (session) {
+      const { handle } = await getIgHandle(session);
       setIgHandleState(handle || "");
     }
   };
 
   const saveInstagram = async (handle: string) => {
-    if (!igCookieRef.current) return setIgModalVisible(false);
+    if (!session) return setIgModalVisible(false);
     try {
       setIgSaving(true);
-      await setIgHandleApi(handle, igCookieRef.current);
+      await setIgHandleApi(handle, session);
       setIgHandleState(handle);
       showToast("Instagram handle saved", "success");
     } catch (e) {
@@ -335,10 +330,10 @@ export default function ProfileScreen() {
   };
 
   const removeInstagram = async () => {
-    if (!igCookieRef.current) return setIgModalVisible(false);
+    if (!session) return setIgModalVisible(false);
     try {
       setIgSaving(true);
-      await deleteIgHandle(igCookieRef.current);
+      await deleteIgHandle(session);
       setIgHandleState("");
     } finally {
       setIgSaving(false);

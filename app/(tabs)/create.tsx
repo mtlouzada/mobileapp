@@ -39,12 +39,12 @@ import {
 } from "~/lib/hive-utils";
 import { theme } from "~/lib/theme";
 import * as SecureStore from "expo-secure-store";
-import { getUserbaseCookieHeader } from "~/lib/userbase/hiveSession";
 import {
   crossPostToInstagram,
   getIgHandle,
   setIgHandle,
   getHivePower,
+  eligibleForCrosspost,
   MIN_HP_TO_CROSSPOST,
 } from "~/lib/instagram";
 import { InstagramHandleModal } from "~/components/Instagram/InstagramHandleModal";
@@ -71,7 +71,6 @@ export default function CreatePost() {
   const [igModalVisible, setIgModalVisible] = useState(false);
   const [igModalSaving, setIgModalSaving] = useState(false);
   const igPromptResolve = React.useRef<(() => void) | null>(null);
-  const igCookieRef = React.useRef<Record<string, string> | null>(null);
 
   const IG_PROMPTED_KEY = "ig_handle_prompted";
 
@@ -89,10 +88,10 @@ export default function CreatePost() {
   };
 
   const saveIgHandle = async (handle: string) => {
-    if (!igCookieRef.current) return closeIgModal();
+    if (!session) return closeIgModal();
     try {
       setIgModalSaving(true);
-      await setIgHandle(handle, igCookieRef.current);
+      await setIgHandle(handle, session);
       showToast("Instagram handle saved", "success");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Could not save handle", "error");
@@ -116,17 +115,13 @@ export default function CreatePost() {
     videoUrl?: string;
   }) => {
     try {
-      if (isUserbaseSession(session) || !session?.decryptedKey) return; // classic-key only
+      if (!session || !eligibleForCrosspost(session)) return; // classic-key only
       if (args.parentAuthor !== SNAPS_CONTAINER_AUTHOR) return; // main feed only
       if (!args.imageUrl && !args.videoUrl) return; // needs media
       if ((await getHivePower(args.author)) < MIN_HP_TO_CROSSPOST) return;
 
-      const cookie = await getUserbaseCookieHeader(session);
-      if (!cookie) return;
-      igCookieRef.current = cookie;
-
       // First-time prompt: if no handle is stored and we haven't asked before.
-      const { source } = await getIgHandle(cookie);
+      const { source } = await getIgHandle(session);
       if (source === null) {
         const alreadyPrompted = await SecureStore.getItemAsync(IG_PROMPTED_KEY);
         if (!alreadyPrompted) {
@@ -136,18 +131,14 @@ export default function CreatePost() {
       }
 
       // Publish in the background (Reels can take 30s+); toast on completion.
-      crossPostToInstagram(
-        {
-          author: args.author,
-          permlink: args.permlink,
-          body: args.body,
-          tags: args.tags,
-          imageUrl: args.imageUrl,
-          videoUrl: args.videoUrl,
-          permalinkUrl: `${WEB_BASE_URL}/post/${args.author}/${args.permlink}`,
-        },
-        cookie
-      )
+      crossPostToInstagram(session, {
+        permlink: args.permlink,
+        body: args.body,
+        tags: args.tags,
+        imageUrl: args.imageUrl,
+        videoUrl: args.videoUrl,
+        permalinkUrl: `${WEB_BASE_URL}/post/${args.author}/${args.permlink}`,
+      })
         .then(() => showToast("Shared to Instagram", "success"))
         .catch((e) =>
           showToast(e instanceof Error ? e.message : "Instagram cross-post failed", "error")

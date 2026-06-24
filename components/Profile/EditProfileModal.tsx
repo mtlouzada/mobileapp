@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -22,8 +22,7 @@ import { useToast } from '~/lib/toast-provider';
 import { HiveClient } from '~/lib/hive-utils';
 import { uploadImageToHive, uploadImageViaUserbase } from '~/lib/upload/image-upload';
 import { isUserbaseSession, updateProfile } from '~/lib/posting';
-import { getUserbaseCookieHeader } from '~/lib/userbase/hiveSession';
-import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle } from '~/lib/instagram';
+import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle, eligibleForCrosspost } from '~/lib/instagram';
 import { InstagramHandleModal } from '~/components/Instagram/InstagramHandleModal';
 
 const COUNTRIES = [
@@ -127,20 +126,16 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
   const [profileImage, setProfileImage] = useState('');
 
   // Instagram handle (userbase-stored; classic Hive-key accounts only)
-  const igEligible = !!session && !isUserbaseSession(session) && !!session.decryptedKey;
+  const igEligible = eligibleForCrosspost(session);
   const [instagramHandle, setInstagramHandle] = useState('');
   const [igModalVisible, setIgModalVisible] = useState(false);
   const [igSaving, setIgSaving] = useState(false);
-  const igCookieRef = useRef<Record<string, string> | null>(null);
 
   useEffect(() => {
-    if (!visible || !igEligible) return;
+    if (!visible || !igEligible || !session) return;
     let cancelled = false;
     (async () => {
-      const cookie = await getUserbaseCookieHeader(session);
-      if (cancelled || !cookie) return;
-      igCookieRef.current = cookie;
-      const { handle } = await getIgHandle(cookie);
+      const { handle } = await getIgHandle(session);
       if (!cancelled) setInstagramHandle(handle || '');
     })();
     return () => {
@@ -149,10 +144,10 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
   }, [visible, igEligible]);
 
   const saveInstagram = async (handle: string) => {
-    if (!igCookieRef.current) return setIgModalVisible(false);
+    if (!session) return setIgModalVisible(false);
     try {
       setIgSaving(true);
-      await setIgHandleApi(handle, igCookieRef.current);
+      await setIgHandleApi(handle, session);
       setInstagramHandle(handle);
       showToast('Instagram handle saved', 'success');
     } catch (e) {
@@ -164,10 +159,10 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
   };
 
   const removeInstagram = async () => {
-    if (!igCookieRef.current) return setIgModalVisible(false);
+    if (!session) return setIgModalVisible(false);
     try {
       setIgSaving(true);
-      await deleteIgHandle(igCookieRef.current);
+      await deleteIgHandle(session);
       setInstagramHandle('');
     } finally {
       setIgSaving(false);
