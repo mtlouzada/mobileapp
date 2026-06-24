@@ -33,10 +33,22 @@ import {
 } from "~/lib/upload/image-upload";
 import { canPost, isUserbaseSession, postComment } from "~/lib/posting";
 import {
+  SNAPS_CONTAINER_AUTHOR,
   COMMUNITY_TAG,
   getLastSnapsContainer,
 } from "~/lib/hive-utils";
 import { theme } from "~/lib/theme";
+import * as SecureStore from "expo-secure-store";
+import { getUserbaseCookieHeader } from "~/lib/userbase/hiveSession";
+import {
+  crossPostToInstagram,
+  getIgHandle,
+  setIgHandle,
+  getHivePower,
+  MIN_HP_TO_CROSSPOST,
+} from "~/lib/instagram";
+import { InstagramHandleModal } from "~/components/Instagram/InstagramHandleModal";
+import { WEB_BASE_URL } from "~/lib/constants";
 
 export default function CreatePost() {
   const { username, session } = useAuth();
@@ -54,6 +66,96 @@ export default function CreatePost() {
   const [uploadProgress, setUploadProgress] = useState<string>("");
   const [videoProgress, setVideoProgress] = useState<number>(0);
   const [videoStage, setVideoStage] = useState<string>("");
+
+  // Instagram first-time handle prompt (eligible classic-key accounts only)
+  const [igModalVisible, setIgModalVisible] = useState(false);
+  const [igModalSaving, setIgModalSaving] = useState(false);
+  const igPromptResolve = React.useRef<(() => void) | null>(null);
+  const igCookieRef = React.useRef<Record<string, string> | null>(null);
+
+  const IG_PROMPTED_KEY = "ig_handle_prompted";
+
+  // Resolve when the user finishes (saves or skips) the IG handle prompt.
+  const promptForIgHandle = () =>
+    new Promise<void>((resolve) => {
+      igPromptResolve.current = resolve;
+      setIgModalVisible(true);
+    });
+
+  const closeIgModal = () => {
+    setIgModalVisible(false);
+    igPromptResolve.current?.();
+    igPromptResolve.current = null;
+  };
+
+  const saveIgHandle = async (handle: string) => {
+    if (!igCookieRef.current) return closeIgModal();
+    try {
+      setIgModalSaving(true);
+      await setIgHandle(handle, igCookieRef.current);
+      showToast("Instagram handle saved", "success");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not save handle", "error");
+    } finally {
+      setIgModalSaving(false);
+      closeIgModal();
+    }
+  };
+
+  // Fire-and-forget cross-post to @skatehive on Instagram for eligible posts:
+  // classic Hive-key account, >=100 HP, posting to the main snaps feed, with
+  // media. The server re-checks HP/limits authoritatively; this only avoids a
+  // doomed request and drives the first-time handle prompt.
+  const maybeCrossPostToInstagram = async (args: {
+    author: string;
+    permlink: string;
+    parentAuthor: string;
+    body: string;
+    tags: string[];
+    imageUrl?: string;
+    videoUrl?: string;
+  }) => {
+    try {
+      if (isUserbaseSession(session) || !session?.decryptedKey) return; // classic-key only
+      if (args.parentAuthor !== SNAPS_CONTAINER_AUTHOR) return; // main feed only
+      if (!args.imageUrl && !args.videoUrl) return; // needs media
+      if ((await getHivePower(args.author)) < MIN_HP_TO_CROSSPOST) return;
+
+      const cookie = await getUserbaseCookieHeader(session);
+      if (!cookie) return;
+      igCookieRef.current = cookie;
+
+      // First-time prompt: if no handle is stored and we haven't asked before.
+      const { source } = await getIgHandle(cookie);
+      if (source === null) {
+        const alreadyPrompted = await SecureStore.getItemAsync(IG_PROMPTED_KEY);
+        if (!alreadyPrompted) {
+          await SecureStore.setItemAsync(IG_PROMPTED_KEY, "1");
+          await promptForIgHandle();
+        }
+      }
+
+      // Publish in the background (Reels can take 30s+); toast on completion.
+      crossPostToInstagram(
+        {
+          author: args.author,
+          permlink: args.permlink,
+          body: args.body,
+          tags: args.tags,
+          imageUrl: args.imageUrl,
+          videoUrl: args.videoUrl,
+          permalinkUrl: `${WEB_BASE_URL}/post/${args.author}/${args.permlink}`,
+        },
+        cookie
+      )
+        .then(() => showToast("Shared to Instagram", "success"))
+        .catch((e) =>
+          showToast(e instanceof Error ? e.message : "Instagram cross-post failed", "error")
+        );
+    } catch {
+      // Never block the post flow on cross-post setup.
+    }
+  };
 
 
   const pickMedia = async () => {
@@ -195,6 +297,9 @@ export default function CreatePost() {
       let postBody = content;
       let imageUrls: string[] = [];
       let videoUrls: string[] = [];
+      // Public media URLs for an optional Instagram cross-post.
+      let igImageUrl: string | undefined;
+      let igVideoUrl: string | undefined;
 
       // Handle media upload
       if (media && mediaType && mediaMimeType) {
@@ -221,6 +326,7 @@ export default function CreatePost() {
                 });
 
             imageUrls.push(imageResult.url);
+            igImageUrl = imageResult.url;
 
             // Add image to post body
             const imageMarkdown = createImageMarkdown(
@@ -261,6 +367,7 @@ export default function CreatePost() {
             );
 
             videoUrls.push(videoResult.cid);
+            igVideoUrl = videoResult.gatewayUrl;
 
             // Add video iframe to post body
             const videoIframe = createVideoIframe(
@@ -319,6 +426,19 @@ export default function CreatePost() {
 
       // Success
       showToast("Posted Successfully", "success");
+
+      // Optional Instagram cross-post (eligible classic-key accounts). Does its
+      // own eligibility checks; publish runs in the background. May show the
+      // first-time handle prompt before navigating away.
+      await maybeCrossPostToInstagram({
+        author: username,
+        permlink,
+        parentAuthor,
+        body: postBody,
+        tags,
+        imageUrl: igImageUrl,
+        videoUrl: igVideoUrl,
+      });
 
       // Clear form
       setContent("");
@@ -471,6 +591,13 @@ export default function CreatePost() {
           </ScrollView>
         </TouchableWithoutFeedback>
       )}
+
+      <InstagramHandleModal
+        visible={igModalVisible}
+        saving={igModalSaving}
+        onSave={saveIgHandle}
+        onClose={closeIgModal}
+      />
     </>
   );
 }

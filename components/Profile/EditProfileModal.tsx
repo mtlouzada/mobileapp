@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Modal,
   View,
@@ -22,6 +22,9 @@ import { useToast } from '~/lib/toast-provider';
 import { HiveClient } from '~/lib/hive-utils';
 import { uploadImageToHive, uploadImageViaUserbase } from '~/lib/upload/image-upload';
 import { isUserbaseSession, updateProfile } from '~/lib/posting';
+import { getUserbaseCookieHeader } from '~/lib/userbase/hiveSession';
+import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle } from '~/lib/instagram';
+import { InstagramHandleModal } from '~/components/Instagram/InstagramHandleModal';
 
 const COUNTRIES = [
   { code: 'AR', name: 'Argentina', flag: '🇦🇷' },
@@ -122,6 +125,55 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
   const [location, setLocation] = useState('');
   const [website, setWebsite] = useState('');
   const [profileImage, setProfileImage] = useState('');
+
+  // Instagram handle (userbase-stored; classic Hive-key accounts only)
+  const igEligible = !!session && !isUserbaseSession(session) && !!session.decryptedKey;
+  const [instagramHandle, setInstagramHandle] = useState('');
+  const [igModalVisible, setIgModalVisible] = useState(false);
+  const [igSaving, setIgSaving] = useState(false);
+  const igCookieRef = useRef<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    if (!visible || !igEligible) return;
+    let cancelled = false;
+    (async () => {
+      const cookie = await getUserbaseCookieHeader(session);
+      if (cancelled || !cookie) return;
+      igCookieRef.current = cookie;
+      const { handle } = await getIgHandle(cookie);
+      if (!cancelled) setInstagramHandle(handle || '');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, igEligible]);
+
+  const saveInstagram = async (handle: string) => {
+    if (!igCookieRef.current) return setIgModalVisible(false);
+    try {
+      setIgSaving(true);
+      await setIgHandleApi(handle, igCookieRef.current);
+      setInstagramHandle(handle);
+      showToast('Instagram handle saved', 'success');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not save handle', 'error');
+    } finally {
+      setIgSaving(false);
+      setIgModalVisible(false);
+    }
+  };
+
+  const removeInstagram = async () => {
+    if (!igCookieRef.current) return setIgModalVisible(false);
+    try {
+      setIgSaving(true);
+      await deleteIgHandle(igCookieRef.current);
+      setInstagramHandle('');
+    } finally {
+      setIgSaving(false);
+      setIgModalVisible(false);
+    }
+  };
 
   const selectedCountry = useMemo(() => getCountryByName(location), [location]);
 
@@ -345,9 +397,34 @@ export function EditProfileModal({ visible, onClose, currentProfile, onSaved }: 
                 autoCapitalize="none"
               />
             </View>
+
+            {igEligible && (
+              <View style={styles.field}>
+                <Text style={styles.label}>Instagram</Text>
+                <Pressable style={styles.countryPicker} onPress={() => setIgModalVisible(true)}>
+                  {instagramHandle ? (
+                    <Text style={styles.countryName}>@{instagramHandle}</Text>
+                  ) : (
+                    <Text style={styles.countryPlaceholder}>
+                      Add your handle for Instagram cross-posts
+                    </Text>
+                  )}
+                  <Ionicons name="logo-instagram" size={16} color={theme.colors.muted} />
+                </Pressable>
+              </View>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <InstagramHandleModal
+        visible={igModalVisible}
+        initialHandle={instagramHandle}
+        saving={igSaving}
+        onSave={saveInstagram}
+        onRemove={removeInstagram}
+        onClose={() => setIgModalVisible(false)}
+      />
 
       {/* Country Picker Modal */}
       <Modal visible={countryPickerVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setCountryPickerVisible(false)}>

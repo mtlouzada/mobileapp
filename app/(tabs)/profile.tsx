@@ -21,6 +21,11 @@ import { PostCard } from "~/components/Feed/PostCard";
 import { LoadingScreen } from "~/components/ui/LoadingScreen";
 import { FollowersModal } from "~/components/Profile/FollowersModal";
 import { EditProfileModal } from "~/components/Profile/EditProfileModal";
+import { InstagramHandleModal } from "~/components/Instagram/InstagramHandleModal";
+import { isUserbaseSession } from "~/lib/posting";
+import { getUserbaseCookieHeader } from "~/lib/userbase/hiveSession";
+import { getIgHandle, setIgHandle as setIgHandleApi, deleteIgHandle } from "~/lib/instagram";
+import { useToast } from "~/lib/toast-provider";
 import { theme } from "~/lib/theme";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
 import useHiveAccount from "~/lib/hooks/useHiveAccount";
@@ -106,10 +111,17 @@ function countryToFlag(location: string): string {
 
 export default function ProfileScreen() {
   const { username: currentUsername, logout, session } = useAuth();
+  const { showToast } = useToast();
   const params = useLocalSearchParams();
   const [followersModalVisible, setFollowersModalVisible] = useState(false);
   const [editProfileVisible, setEditProfileVisible] = useState(false);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  // Instagram handle management (classic Hive-key accounts only)
+  const igEligible = !!session && !isUserbaseSession(session) && !!session.decryptedKey;
+  const [igModalVisible, setIgModalVisible] = useState(false);
+  const [igHandle, setIgHandleState] = useState("");
+  const [igSaving, setIgSaving] = useState(false);
+  const igCookieRef = useRef<Record<string, string> | null>(null);
   const [modalType, setModalType] = useState<'followers' | 'following' | 'muted'>('followers');
   const [profileTab, setProfileTab] = useState<'grid' | 'posts'>('grid');
   const [visibleGridItems, setVisibleGridItems] = useState<Set<string>>(new Set());
@@ -293,6 +305,44 @@ export default function ProfileScreen() {
       router.push("/");
     } catch (error) {
       console.error("Error logging out:", error);
+    }
+  };
+
+  const openInstagramSettings = async () => {
+    setSettingsMenuVisible(false);
+    setIgModalVisible(true);
+    const cookie = await getUserbaseCookieHeader(session);
+    igCookieRef.current = cookie;
+    if (cookie) {
+      const { handle } = await getIgHandle(cookie);
+      setIgHandleState(handle || "");
+    }
+  };
+
+  const saveInstagram = async (handle: string) => {
+    if (!igCookieRef.current) return setIgModalVisible(false);
+    try {
+      setIgSaving(true);
+      await setIgHandleApi(handle, igCookieRef.current);
+      setIgHandleState(handle);
+      showToast("Instagram handle saved", "success");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not save handle", "error");
+    } finally {
+      setIgSaving(false);
+      setIgModalVisible(false);
+    }
+  };
+
+  const removeInstagram = async () => {
+    if (!igCookieRef.current) return setIgModalVisible(false);
+    try {
+      setIgSaving(true);
+      await deleteIgHandle(igCookieRef.current);
+      setIgHandleState("");
+    } finally {
+      setIgSaving(false);
+      setIgModalVisible(false);
     }
   };
 
@@ -681,6 +731,15 @@ export default function ProfileScreen() {
               <Ionicons name="create-outline" size={20} color={theme.colors.primary} />
               <Text style={styles.dialogItemText}>Edit Profile</Text>
             </Pressable>
+            {igEligible && (
+              <>
+                <View style={styles.dialogDivider} />
+                <Pressable style={styles.dialogItem} onPress={openInstagramSettings}>
+                  <Ionicons name="logo-instagram" size={20} color={theme.colors.primary} />
+                  <Text style={styles.dialogItemText}>Instagram cross-post</Text>
+                </Pressable>
+              </>
+            )}
             <View style={styles.dialogDivider} />
             <Pressable
               style={styles.dialogItem}
@@ -695,6 +754,15 @@ export default function ProfileScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      <InstagramHandleModal
+        visible={igModalVisible}
+        initialHandle={igHandle}
+        saving={igSaving}
+        onSave={saveInstagram}
+        onRemove={removeInstagram}
+        onClose={() => setIgModalVisible(false)}
+      />
     </View>
   );
 }
