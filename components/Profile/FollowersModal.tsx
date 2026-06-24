@@ -16,6 +16,7 @@ import { theme } from '~/lib/theme';
 import { getFollowing, getFollowers, getMuted } from '~/lib/hive-utils';
 import { canPost, setRelationship } from '~/lib/posting';
 import { useAuth } from '~/lib/auth-provider';
+import { useToast } from '~/lib/toast-provider';
 
 interface FollowersModalProps {
   visible: boolean;
@@ -76,6 +77,7 @@ export const FollowersModal: React.FC<FollowersModalProps> = ({
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const { session, username: currentUsername } = useAuth();
+  const { showToast } = useToast();
 
   useEffect(() => {
     if (visible) {
@@ -148,6 +150,10 @@ export const FollowersModal: React.FC<FollowersModalProps> = ({
       setUsers(prevUsers => prevUsers.filter(user => user !== targetUsername));
     } catch (error) {
       console.error('Error unmuting user:', error);
+      showToast(
+        error instanceof Error ? error.message : 'Failed to unmute user',
+        'error',
+      );
     }
   };
 
