@@ -2,6 +2,7 @@ import React from "react";
 import {
   View,
   ScrollView,
+  FlatList,
   Pressable,
   StyleSheet,
   Linking,
@@ -19,7 +20,7 @@ import { EnhancedMarkdownRenderer } from "~/components/markdown/EnhancedMarkdown
 import { theme } from "~/lib/theme";
 import { useAllSpots, useSpot } from "~/lib/hooks/useSpotmap";
 import { parseKmlDescription } from "~/lib/spotmap/parseKmlDescription";
-import { KML_AUTHOR, type SpotmapRow } from "~/lib/spotmap/types";
+import { KML_AUTHOR, isHiveSpot, type SpotmapRow } from "~/lib/spotmap/types";
 
 function relativeDate(iso?: string | null): string {
   if (!iso) return "";
@@ -44,74 +45,38 @@ export default function SpotDetailScreen() {
     permlink: string;
   }>();
   const { width } = useWindowDimensions();
-
-  const isKml = author === KML_AUTHOR;
-
-  // KML permlink IS the row uuid → fetch directly. Hive spots need the list
-  // to map (author, permlink) → uuid.
   const { data: allSpots } = useAllSpots();
-  const baseRow = React.useMemo<SpotmapRow | undefined>(() => {
-    if (!allSpots) return undefined;
-    if (isKml) return allSpots.find((s) => s.id === permlink);
-    return allSpots.find(
-      (s) => s.hive_author === author && s.hive_permlink === permlink,
+  const listRef = React.useRef<FlatList<SpotmapRow>>(null);
+
+  // Index of the spot we deep-linked to, within the full list (so the whole
+  // list becomes a horizontal pager — swipe left/right for prev/next spot).
+  const initialIndex = React.useMemo(() => {
+    if (!allSpots) return -1;
+    const isKmlEntry = author === KML_AUTHOR;
+    return allSpots.findIndex((s) =>
+      isKmlEntry
+        ? s.id === permlink
+        : s.hive_author === author && s.hive_permlink === permlink,
     );
-  }, [allSpots, author, permlink, isKml]);
+  }, [allSpots, author, permlink]);
 
-  const spotId = isKml ? permlink : baseRow?.id;
-  const { data: detail, isLoading } = useSpot(spotId);
+  const [currentIndex, setCurrentIndex] = React.useState(0);
+  React.useEffect(() => {
+    if (initialIndex >= 0) setCurrentIndex(initialIndex);
+  }, [initialIndex]);
 
-  const spot = detail ?? baseRow;
-
-  const images = React.useMemo<string[]>(() => {
-    if (!spot) return [];
-    const urls: string[] = [];
-    spot.images?.forEach((i) => i?.url && urls.push(i.url));
-    if (isKml && spot.kml_description) {
-      parseKmlDescription(spot.kml_description).images.forEach((u) =>
-        urls.push(u),
-      );
-    }
-    if (!urls.length && spot.thumbnail) urls.push(spot.thumbnail);
-    return Array.from(new Set(urls));
-  }, [spot, isKml]);
-
-  const aboutText = React.useMemo(() => {
-    if (!spot) return "";
-    if (isKml) return parseKmlDescription(spot.kml_description).text;
-    return spot.description ?? "";
-  }, [spot, isKml]);
-
-  const openDirections = React.useCallback(() => {
-    if (!spot) return;
-    Haptics.selectionAsync();
-    Linking.openURL(
-      `https://www.google.com/maps/dir/?api=1&destination=${spot.lat},${spot.lng}`,
-    );
-  }, [spot]);
-
-  const openInMaps = React.useCallback(() => {
-    if (!spot) return;
-    Haptics.selectionAsync();
-    Linking.openURL(`https://www.google.com/maps?q=${spot.lat},${spot.lng}`);
-  }, [spot]);
-
-  const openDiscussion = React.useCallback(() => {
-    router.push({
-      pathname: "/conversation",
-      params: { author: author!, permlink: permlink! },
-    });
-  }, [author, permlink]);
-
-  if (!spot && isLoading) {
+  if (!allSpots) {
     return (
-      <View style={[styles.container, styles.centerFill]}>
-        <ActivityIndicator color={theme.colors.primary} />
+      <View style={styles.container}>
+        <Header title="Spot" />
+        <View style={styles.centerFill}>
+          <ActivityIndicator color={theme.colors.primary} />
+        </View>
       </View>
     );
   }
 
-  if (!spot) {
+  if (initialIndex < 0) {
     return (
       <View style={styles.container}>
         <Header title="Spot" />
@@ -122,133 +87,201 @@ export default function SpotDetailScreen() {
     );
   }
 
+  const current = allSpots[currentIndex] ?? allSpots[initialIndex];
+
   return (
     <View style={styles.container}>
-      <Header title={spot.name || "Spot"} />
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Image carousel */}
-        {images.length > 0 && (
-          <ScrollView
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            style={{ width }}
-          >
-            {images.map((uri, i) => (
-              <Image
-                key={`${uri}-${i}`}
-                source={{ uri }}
-                style={{ width, height: width * 0.7 }}
-                contentFit="cover"
-                transition={150}
-              />
-            ))}
-          </ScrollView>
-        )}
-
-        <View style={styles.section}>
-          <Text style={styles.name}>{spot.name || "Unnamed spot"}</Text>
-
-          {/* Source attribution */}
-          {isKml ? (
-            <View style={styles.curatedBadge}>
-              <Ionicons name="map" size={14} color={theme.colors.muted} />
-              <Text style={styles.curatedText}>
-                From the curated Google My Maps dataset
-              </Text>
-            </View>
-          ) : (
-            <Pressable
-              style={styles.authorRow}
-              onPress={() =>
-                router.push({
-                  pathname: "/(tabs)/profile",
-                  params: { username: spot.hive_author ?? "" },
-                })
-              }
-            >
-              <Text style={styles.author}>@{spot.hive_author}</Text>
-              {!!spot.hive_created && (
-                <Text style={styles.muted}>
-                  {" · "}
-                  {relativeDate(spot.hive_created)}
-                </Text>
-              )}
-            </Pressable>
-          )}
-
-          {!!spot.address && (
-            <Text style={styles.address}>{spot.address}</Text>
-          )}
-        </View>
-
-        {/* About */}
-        {!!aboutText && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>About this spot</Text>
-            {isKml ? (
-              <Text style={styles.kmlText}>{aboutText}</Text>
-            ) : (
-              <EnhancedMarkdownRenderer content={aboutText} />
-            )}
-          </View>
-        )}
-
-        {/* Location */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Location</Text>
-          <View style={styles.miniMapWrap}>
-            <MapView
-              provider={PROVIDER_DEFAULT}
-              style={styles.miniMap}
-              pointerEvents="none"
-              userInterfaceStyle="dark"
-              initialRegion={{
-                latitude: spot.lat,
-                longitude: spot.lng,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
-              }}
-            >
-              <Marker coordinate={{ latitude: spot.lat, longitude: spot.lng }}>
-                <View style={styles.pin}>
-                  <Text style={styles.pinEmoji}>🛹</Text>
-                </View>
-              </Marker>
-            </MapView>
-          </View>
-          <Text style={styles.coords}>
-            {spot.lat.toFixed(5)}, {spot.lng.toFixed(5)}
-          </Text>
-        </View>
-
-        {/* Actions */}
-        <View style={styles.actions}>
-          <Pressable style={styles.actionPrimary} onPress={openDirections}>
-            <Ionicons name="navigate" size={18} color={theme.colors.black} />
-            <Text style={styles.actionPrimaryText}>Directions</Text>
-          </Pressable>
-          <Pressable style={styles.actionSecondary} onPress={openInMaps}>
-            <Ionicons name="map-outline" size={18} color={theme.colors.primary} />
-            <Text style={styles.actionSecondaryText}>Open in Maps</Text>
-          </Pressable>
-        </View>
-
-        {!isKml && (
-          <Pressable style={styles.discussionBtn} onPress={openDiscussion}>
-            <Ionicons
-              name="chatbubbles-outline"
-              size={18}
-              color={theme.colors.primary}
-            />
-            <Text style={styles.discussionText}>View discussion</Text>
-          </Pressable>
-        )}
-      </ScrollView>
+      <Header title={current?.name || "Spot"} />
+      <FlatList
+        ref={listRef}
+        data={allSpots}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(s) => s.id}
+        initialScrollIndex={initialIndex}
+        getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+        onMomentumScrollEnd={(e) => {
+          const i = Math.round(e.nativeEvent.contentOffset.x / width);
+          if (i !== currentIndex) {
+            Haptics.selectionAsync();
+            setCurrentIndex(i);
+          }
+        }}
+        windowSize={3}
+        initialNumToRender={1}
+        maxToRenderPerBatch={2}
+        removeClippedSubviews
+        renderItem={({ item }) => <SpotPage spot={item} width={width} />}
+      />
     </View>
+  );
+}
+
+// One spot's full detail page (a single page of the horizontal pager).
+function SpotPage({ spot: row, width }: { spot: SpotmapRow; width: number }) {
+  const isKml = !isHiveSpot(row);
+  const { data: detail } = useSpot(row.id);
+  const spot = detail ?? row;
+
+  const images = React.useMemo<string[]>(() => {
+    const urls: string[] = [];
+    spot.images?.forEach((i) => i?.url && urls.push(i.url));
+    if (isKml && spot.kml_description) {
+      parseKmlDescription(spot.kml_description).images.forEach((u) => urls.push(u));
+    }
+    if (!urls.length && spot.thumbnail) urls.push(spot.thumbnail);
+    return Array.from(new Set(urls));
+  }, [spot, isKml]);
+
+  const aboutText = React.useMemo(() => {
+    if (isKml) return parseKmlDescription(spot.kml_description).text;
+    return spot.description ?? "";
+  }, [spot, isKml]);
+
+  const openDirections = React.useCallback(() => {
+    Haptics.selectionAsync();
+    Linking.openURL(
+      `https://www.google.com/maps/dir/?api=1&destination=${spot.lat},${spot.lng}`,
+    );
+  }, [spot.lat, spot.lng]);
+
+  const openInMaps = React.useCallback(() => {
+    Haptics.selectionAsync();
+    Linking.openURL(`https://www.google.com/maps?q=${spot.lat},${spot.lng}`);
+  }, [spot.lat, spot.lng]);
+
+  const openDiscussion = React.useCallback(() => {
+    if (!row.hive_author || !row.hive_permlink) return;
+    router.push({
+      pathname: "/conversation",
+      params: { author: row.hive_author, permlink: row.hive_permlink },
+    });
+  }, [row.hive_author, row.hive_permlink]);
+
+  return (
+    <ScrollView
+      style={{ width }}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.scrollContent}
+    >
+      {/* Image carousel */}
+      {images.length > 0 && (
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          style={{ width }}
+        >
+          {images.map((uri, i) => (
+            <Image
+              key={`${uri}-${i}`}
+              source={{ uri }}
+              style={{ width, height: width * 0.7 }}
+              contentFit="cover"
+              transition={150}
+            />
+          ))}
+        </ScrollView>
+      )}
+
+      <View style={styles.section}>
+        <Text style={styles.name}>{spot.name || "Unnamed spot"}</Text>
+
+        {/* Source attribution */}
+        {isKml ? (
+          <View style={styles.curatedBadge}>
+            <Ionicons name="map" size={14} color={theme.colors.muted} />
+            <Text style={styles.curatedText}>
+              From the curated Google My Maps dataset
+            </Text>
+          </View>
+        ) : (
+          <Pressable
+            style={styles.authorRow}
+            onPress={() =>
+              router.push({
+                pathname: "/(tabs)/profile",
+                params: { username: spot.hive_author ?? "" },
+              })
+            }
+          >
+            <Text style={styles.author}>@{spot.hive_author}</Text>
+            {!!spot.hive_created && (
+              <Text style={styles.muted}>
+                {" · "}
+                {relativeDate(spot.hive_created)}
+              </Text>
+            )}
+          </Pressable>
+        )}
+
+        {!!spot.address && <Text style={styles.address}>{spot.address}</Text>}
+      </View>
+
+      {/* About */}
+      {!!aboutText && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>About this spot</Text>
+          {isKml ? (
+            <Text style={styles.kmlText}>{aboutText}</Text>
+          ) : (
+            <EnhancedMarkdownRenderer content={aboutText} />
+          )}
+        </View>
+      )}
+
+      {/* Location */}
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Location</Text>
+        <View style={styles.miniMapWrap}>
+          <MapView
+            provider={PROVIDER_DEFAULT}
+            style={styles.miniMap}
+            pointerEvents="none"
+            userInterfaceStyle="dark"
+            initialRegion={{
+              latitude: spot.lat,
+              longitude: spot.lng,
+              latitudeDelta: 0.02,
+              longitudeDelta: 0.02,
+            }}
+          >
+            <Marker coordinate={{ latitude: spot.lat, longitude: spot.lng }}>
+              <View style={styles.pin}>
+                <Text style={styles.pinEmoji}>🛹</Text>
+              </View>
+            </Marker>
+          </MapView>
+        </View>
+        <Text style={styles.coords}>
+          {spot.lat.toFixed(5)}, {spot.lng.toFixed(5)}
+        </Text>
+      </View>
+
+      {/* Actions */}
+      <View style={styles.actions}>
+        <Pressable style={styles.actionPrimary} onPress={openDirections}>
+          <Ionicons name="navigate" size={18} color={theme.colors.black} />
+          <Text style={styles.actionPrimaryText}>Directions</Text>
+        </Pressable>
+        <Pressable style={styles.actionSecondary} onPress={openInMaps}>
+          <Ionicons name="map-outline" size={18} color={theme.colors.primary} />
+          <Text style={styles.actionSecondaryText}>Open in Maps</Text>
+        </Pressable>
+      </View>
+
+      {!isKml && (
+        <Pressable style={styles.discussionBtn} onPress={openDiscussion}>
+          <Ionicons
+            name="chatbubbles-outline"
+            size={18}
+            color={theme.colors.primary}
+          />
+          <Text style={styles.discussionText}>View discussion</Text>
+        </Pressable>
+      )}
+    </ScrollView>
   );
 }
 
@@ -286,6 +319,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     fontSize: theme.fontSizes.lg,
+    lineHeight: theme.fontSizes.lg * 1.3,
     fontFamily: theme.fonts.bold,
     color: theme.colors.white,
   },
@@ -293,6 +327,8 @@ const styles = StyleSheet.create({
   section: { padding: theme.spacing.md, gap: theme.spacing.xs },
   name: {
     fontSize: theme.fontSizes.xxl,
+    lineHeight: theme.fontSizes.xxl * 1.3, // FiraCode-Bold clips without this
+    paddingVertical: 2,
     fontFamily: theme.fonts.bold,
     color: theme.colors.white,
   },

@@ -5,7 +5,7 @@ import {
   getRewards,
   getVideoFeed } from '../api';
 import { API_BASE_URL, LEADERBOARD_API_URL, HIVE_AVATAR_URL } from '../constants';
-import { extractMediaFromBody } from '../utils';
+import { extractMediaFromBody, filterDeletedPosts } from '../utils';
 import type { Post } from '../types';
 
 // ============================================================================
@@ -76,15 +76,16 @@ async function fetchVideoFeed(): Promise<VideoPost[]> {
   // Try the dedicated /videos endpoint first
   const result = await getVideoFeed(1, 30);
   if (result) {
-    return result.data.map((entry: any) => ({
+    const mapped = result.data.map((entry: any) => ({
       ...entry,
       username: entry.author,
     }));
+    return filterDeletedPosts(mapped);
   }
 
   // Fallback: use general feed + client-side extraction
   const posts = await getFeed(1, 50);
-  return extractVideosFromFeed(posts);
+  return filterDeletedPosts(extractVideosFromFeed(filterDeletedPosts(posts)));
 }
 
 export function useVideoFeed() {

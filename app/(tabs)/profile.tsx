@@ -7,7 +7,6 @@ import {
   RefreshControl,
   StyleSheet,
   FlatList,
-  Modal,
   Dimensions,
   Animated,
   ViewToken,
@@ -28,10 +27,11 @@ import { theme } from "~/lib/theme";
 import { HIVE_AVATAR_URL } from "~/lib/constants";
 import useHiveAccount from "~/lib/hooks/useHiveAccount";
 import { useUserComments } from "~/lib/hooks/useUserComments";
-import { extractMediaFromBody } from "~/lib/utils";
+import { extractMediaFromBody, filterDeletedPosts } from "~/lib/utils";
 import { Image } from "expo-image";
 import { GridVideoTile } from "~/components/Profile/GridVideoTile";
 import { ImmersivePostViewer } from "~/components/Feed/ImmersivePostViewer";
+import { ActionSheet, type ActionSheetItem } from "~/components/ui/ActionSheet";
 
 const GRID_COLS = 3;
 const GRID_GAP = 2;
@@ -235,10 +235,13 @@ export default function ProfileScreen() {
     return hasDirectMedia;
   }, []);
 
+  // Hide deleted/tombstoned posts everywhere on the profile.
+  const visiblePosts = useMemo(() => filterDeletedPosts(userPosts), [userPosts]);
+
   // Filter posts to only those with media for the grid view
   const gridPosts = useMemo(() =>
-    userPosts.filter(postHasMedia),
-    [userPosts, postHasMedia]
+    visiblePosts.filter(postHasMedia),
+    [visiblePosts, postHasMedia]
   );
 
   // Auto-fill the grid until it has enough items to be scrollable (~5 rows).
@@ -676,7 +679,7 @@ export default function ProfileScreen() {
       ) : (
         <FlatList
           key="posts"
-          data={userPosts}
+          data={visiblePosts}
           renderItem={renderPostItem}
           keyExtractor={(item) => item.permlink}
           ListHeaderComponent={renderProfileHeader}
@@ -735,48 +738,52 @@ export default function ProfileScreen() {
         />
       )}
 
-      {/* Settings Dialog */}
-      <Modal
+      {/* Settings action sheet (gear menu) */}
+      <ActionSheet
         visible={settingsMenuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSettingsMenuVisible(false)}
-      >
-        <Pressable style={styles.dialogOverlay} onPress={() => setSettingsMenuVisible(false)}>
-          <View style={styles.dialogBox}>
-            <Pressable
-              style={styles.dialogItem}
-              onPress={() => {
-                setSettingsMenuVisible(false);
-                setEditProfileVisible(true);
-              }}
-            >
-              <Ionicons name="create-outline" size={20} color={theme.colors.primary} />
-              <Text style={styles.dialogItemText}>Edit Profile</Text>
-            </Pressable>
-            {igEligible && (
-              <>
-                <View style={styles.dialogDivider} />
-                <Pressable style={styles.dialogItem} onPress={openInstagramSettings}>
-                  <Ionicons name="logo-instagram" size={20} color={theme.colors.primary} />
-                  <Text style={styles.dialogItemText}>Instagram cross-post</Text>
-                </Pressable>
-              </>
-            )}
-            <View style={styles.dialogDivider} />
-            <Pressable
-              style={styles.dialogItem}
-              onPress={() => {
-                setSettingsMenuVisible(false);
-                handleLogout();
-              }}
-            >
-              <Ionicons name="log-out-outline" size={20} color={theme.colors.danger} />
-              <Text style={[styles.dialogItemText, { color: theme.colors.danger }]}>Logout</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+        onClose={() => setSettingsMenuVisible(false)}
+        title="Settings"
+        subtitle={currentUsername ? `@${currentUsername}` : undefined}
+        items={[
+          {
+            key: "edit",
+            icon: "create-outline",
+            title: "Edit Profile",
+            subtitle: "Name, bio & avatar",
+            variant: "primary",
+            onPress: () => {
+              setSettingsMenuVisible(false);
+              setEditProfileVisible(true);
+            },
+          },
+          ...(igEligible
+            ? [
+                {
+                  key: "instagram",
+                  icon: "logo-instagram",
+                  title: "Instagram",
+                  subtitle: "Cross-post your clips",
+                  variant: "secondary",
+                  onPress: () => {
+                    setSettingsMenuVisible(false);
+                    openInstagramSettings();
+                  },
+                } as ActionSheetItem,
+              ]
+            : []),
+          {
+            key: "logout",
+            icon: "log-out-outline",
+            title: "Logout",
+            subtitle: currentUsername ? `Sign out @${currentUsername}` : "Sign out",
+            variant: "danger",
+            onPress: () => {
+              setSettingsMenuVisible(false);
+              handleLogout();
+            },
+          },
+        ]}
+      />
 
       <InstagramHandleModal
         visible={igModalVisible}
@@ -826,36 +833,6 @@ const styles = StyleSheet.create({
   },
   gearIcon: {
     padding: theme.spacing.xs,
-  },
-  dialogOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dialogBox: {
-    backgroundColor: theme.colors.secondaryCard,
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    width: 220,
-    overflow: 'hidden',
-  },
-  dialogItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
-  },
-  dialogItemText: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.regular,
-    fontSize: theme.fontSizes.md,
-  },
-  dialogDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.colors.border,
   },
   profileName: {
     fontSize: theme.fontSizes.xl,

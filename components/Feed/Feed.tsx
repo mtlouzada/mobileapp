@@ -13,14 +13,14 @@ import { PostCard } from "./PostCard";
 import { ActivityIndicator } from "react-native";
 import { useAuth } from "~/lib/auth-provider";
 import { useSnaps } from "~/lib/hooks/useSnaps";
+import { isDeletedPost } from "~/lib/utils";
 import { theme } from "~/lib/theme";
 import {
   ViewportTrackerProvider,
   useViewportTracker,
 } from "~/lib/ViewportTracker";
 import { FullConversationDrawer } from "./FullConversationDrawer";
-import { BadgedIcon } from "../ui/BadgedIcon";
-import { useNotificationContext } from "~/lib/notifications-context";
+import { Ionicons } from "@expo/vector-icons";
 import type { Discussion } from "@hiveio/dhive";
 import type { NestedDiscussion } from "~/lib/types";
 
@@ -35,7 +35,6 @@ function FeedContent({ refreshTrigger, onRefresh }: FeedProps) {
   const { comments, isLoading, loadNextPage, hasMore, refresh } = useSnaps();
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const { updateVisibleItems } = useViewportTracker();
-  const { badgeCount } = useNotificationContext();
 
   // Single shared drawer instance — avoids mounting 1 per PostCard
   const [fullConversationPost, setFullConversationPost] = React.useState<
@@ -86,6 +85,9 @@ function FeedContent({ refreshTrigger, onRefresh }: FeedProps) {
     if (!comments || comments.length === 0) return [];
 
     return comments.filter((post) => {
+      // Deleted/tombstoned posts never show, even your own.
+      if (isDeletedPost(post)) return false;
+
       // Don't filter out the user's own posts
       if (post.author === username) return true;
 
@@ -119,8 +121,8 @@ function FeedContent({ refreshTrigger, onRefresh }: FeedProps) {
     [],
   );
 
-  const handleNotificationsPress = React.useCallback(() => {
-    router.push("/(tabs)/notifications");
+  const handleLeaderboardPress = React.useCallback(() => {
+    router.push("/(tabs)/leaderboard");
   }, [router]);
 
   const ListHeaderComponent = React.useCallback(
@@ -129,25 +131,18 @@ function FeedContent({ refreshTrigger, onRefresh }: FeedProps) {
         <Text style={styles.headerText}>Feed</Text>
         <View style={styles.headerActions}>
           <Pressable
-            onPress={handleNotificationsPress}
+            onPress={handleLeaderboardPress}
             style={styles.headerButton}
             accessibilityRole="button"
-            accessibilityLabel={
-              badgeCount > 0
-                ? `Notifications, ${badgeCount} unread`
-                : "Notifications"
-            }
+            accessibilityLabel="Leaderboard"
+            hitSlop={8}
           >
-            <BadgedIcon
-              name="notifications-outline"
-              color={theme.colors.text}
-              badgeCount={badgeCount}
-            />
+            <Ionicons name="podium-outline" size={24} color={theme.colors.text} />
           </Pressable>
         </View>
       </View>
     ),
-    [handleNotificationsPress, badgeCount],
+    [handleLeaderboardPress],
   );
 
   const ListFooterComponent = isLoading ? (

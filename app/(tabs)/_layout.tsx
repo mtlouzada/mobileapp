@@ -1,12 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
-import { StyleSheet, View, PanResponder, Modal, Pressable } from "react-native";
+import { StyleSheet, View, PanResponder } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRef, useState } from "react";
 import * as Haptics from "expo-haptics";
 import { theme } from "~/lib/theme";
-import { Text } from "~/components/ui/text";
 import { ErrorBoundary } from "~/components/ui/ErrorBoundary";
+import { useAuth } from "~/lib/auth-provider";
+import { canPost } from "~/lib/posting";
+import { useNotificationContext } from "~/lib/notifications-context";
+import { ActionSheet } from "~/components/ui/ActionSheet";
 
 interface TabItem {
   name: string;
@@ -37,9 +40,9 @@ const TAB_ITEMS: TabItem[] = [
     isCenter: true,
   },
   {
-    name: "leaderboard",
-    title: "Leaderboard",
-    icon: "podium-outline",
+    name: "notifications",
+    title: "Notifications",
+    icon: "notifications-outline",
     iconFamily: "Ionicons",
   },
   {
@@ -74,63 +77,32 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  // Drop-up anchored above the center "+" button
-  createMenuOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    alignItems: "center",
-    paddingBottom: 96, // clears the 60px tab bar + the button's upward float
-  },
-  createMenuCard: {
-    backgroundColor: theme.colors.secondaryCard,
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.primary,
-    minWidth: 180,
-    overflow: "hidden",
-    shadowColor: theme.colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  createMenuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
-  },
-  createMenuText: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.bold,
-    fontSize: theme.fontSizes.md,
-  },
-  createMenuDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.colors.border,
-  },
-  createMenuPointer: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderTopWidth: 10,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderTopColor: theme.colors.secondaryCard,
-    marginTop: -1,
-  },
 });
 
 export default function TabLayout() {
   const router = useRouter();
+  const { session, username } = useAuth();
+  const { badgeCount } = useNotificationContext();
   const [createMenuVisible, setCreateMenuVisible] = useState(false);
 
+  // Logged-out / spectator users can't post — send them to login instead of
+  // the create flow.
+  const requireAuth = (): boolean => {
+    if (canPost(session)) return true;
+    Haptics.selectionAsync();
+    router.push("/login");
+    return false;
+  };
+
   const openCreateMenu = () => {
+    if (!requireAuth()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setCreateMenuVisible(true);
   };
+
+  // The PanResponder below is created once, so read auth through a live ref.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   const handleMenuChoice = (target: "/(tabs)/create" | "/spot-create") => {
     setCreateMenuVisible(false);
@@ -150,7 +122,8 @@ export default function TabLayout() {
       onPanResponderRelease: (evt, gestureState) => {
         // Detect swipe from left to right
         if (gestureState.dx > 100 && gestureState.vx > 0.5) {
-          router.push("/(tabs)/create");
+          if (canPost(sessionRef.current)) router.push("/(tabs)/create");
+          else router.push("/login");
         }
       },
     })
@@ -217,6 +190,16 @@ export default function TabLayout() {
                       params: {},
                     },
                   }),
+                  // Unread badge now lives on the notifications tab.
+                  ...(tab.name === "notifications" &&
+                    badgeCount > 0 && {
+                      tabBarBadge: badgeCount,
+                      tabBarBadgeStyle: {
+                        backgroundColor: theme.colors.primary,
+                        color: theme.colors.black,
+                        fontSize: 10,
+                      },
+                    }),
                 }}
               />
             ))}
@@ -230,49 +213,42 @@ export default function TabLayout() {
               }}
             />
 
-            {/* Hidden notifications tab - accessible from header */}
+            {/* Hidden leaderboard tab - now opened from the forum/feed header */}
             <Tabs.Screen
-              name="notifications"
+              name="leaderboard"
               options={{
                 href: null,
-                title: "Notifications",
+                title: "Leaderboard",
               }}
             />
           </Tabs>
         </View>
 
-        {/* Drop-up shown when the center "+" is tapped */}
-        <Modal
+        {/* Variant-C action sheet shown when the center "+" is tapped */}
+        <ActionSheet
           visible={createMenuVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setCreateMenuVisible(false)}
-        >
-          <Pressable
-            style={styles.createMenuOverlay}
-            onPress={() => setCreateMenuVisible(false)}
-          >
-            <View style={styles.createMenuCard}>
-              <Pressable
-                style={styles.createMenuItem}
-                onPress={() => handleMenuChoice("/(tabs)/create")}
-              >
-                <Ionicons name="create-outline" size={22} color={theme.colors.primary} />
-                <Text style={styles.createMenuText}>Post</Text>
-              </Pressable>
-              <View style={styles.createMenuDivider} />
-              <Pressable
-                style={styles.createMenuItem}
-                onPress={() => handleMenuChoice("/spot-create")}
-              >
-                <Ionicons name="location-outline" size={22} color={theme.colors.primary} />
-                <Text style={styles.createMenuText}>Spot</Text>
-              </Pressable>
-            </View>
-            {/* Pointer triangle aimed at the center button */}
-            <View style={styles.createMenuPointer} />
-          </Pressable>
-        </Modal>
+          onClose={() => setCreateMenuVisible(false)}
+          title="Create"
+          subtitle={username ? `@${username}` : undefined}
+          items={[
+            {
+              key: "post",
+              icon: "create-outline",
+              title: "Post",
+              subtitle: "Share a clip with the crew",
+              variant: "primary",
+              onPress: () => handleMenuChoice("/(tabs)/create"),
+            },
+            {
+              key: "spot",
+              icon: "location-outline",
+              title: "Spot",
+              subtitle: "Add a skate spot to the map",
+              variant: "secondary",
+              onPress: () => handleMenuChoice("/spot-create"),
+            },
+          ]}
+        />
       </SafeAreaView>
     </ErrorBoundary>
   );

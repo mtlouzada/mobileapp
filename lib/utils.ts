@@ -1,9 +1,30 @@
 import type { Media, Post } from './types';
-import { ViewStyle, TextStyle, ImageStyle } from 'react-native';
 
-// Simple utility to merge styles (replacement for cn function)
-export function mergeStyles(...styles: any[]) {
-  return styles.filter(Boolean).reduce((acc, style) => ({ ...acc, ...style }), {});
+// Hive forbids on-chain deletion after the 7-day payout window, so clients
+// "delete" by editing the post to a tombstone (title "REMOVED" / body
+// "deleted"). Detect that — plus any explicit deleted flag — so these never
+// surface in a feed.
+export function isDeletedPost(post: any): boolean {
+  if (!post) return true;
+  if (post.deleted === true || post.is_deleted === true) return true;
+
+  const title = String(post.title ?? '').trim();
+  const tl = title.toLowerCase();
+  if (tl === 'removed' || tl === '[removed]') return true;
+
+  // Body checks only when the object actually carries a body (video-feed
+  // entries don't), so we never false-positive a title-less snap/video.
+  if (typeof post.body === 'string') {
+    const bl = post.body.trim().toLowerCase();
+    if (bl === 'deleted' || bl === '[deleted]' || bl === 'removed') return true;
+    if (title === '' && post.body.trim() === '') return true; // empty tombstone
+  }
+  return false;
+}
+
+/** Drop tombstoned/deleted posts from a feed array. */
+export function filterDeletedPosts<T>(posts: T[]): T[] {
+  return Array.isArray(posts) ? posts.filter((p) => !isDeletedPost(p)) : posts;
 }
 
 export function extractMediaFromBody(body: string): Media[] {
