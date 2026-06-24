@@ -362,8 +362,9 @@ export default function ProfileScreen() {
     return <LoadingScreen />;
   }
 
-  // Email/lite account with no on-chain Hive account yet — friendly state
-  // instead of an error (their handle is reserved, not yet claimed on Hive).
+  // Email/lite account with no on-chain Hive account yet — reuse the spectator
+  // profile look (logo + handle) with a short, lite-specific CTA instead of a
+  // wall of text or a profile-fetch error.
   if (
     session?.kind === "userbase" &&
     profileUsername === currentUsername &&
@@ -371,16 +372,29 @@ export default function ProfileScreen() {
   ) {
     return (
       <View style={styles.errorContainer}>
-        <Text style={{ fontSize: 44, marginBottom: 12 }}>🛹</Text>
-        <Text style={{ fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.lg, color: theme.colors.text }}>
+        <Image
+          source={require("../../assets/images/icon-android.png")}
+          style={styles.spectatorLogo}
+        />
+        <Text style={[styles.profileName, { marginTop: theme.spacing.md }]}>
           @{currentUsername}
         </Text>
-        <Text style={[styles.errorText, { marginTop: 10, textAlign: "center", paddingHorizontal: 24 }]}>
-          You're on a SkateHive lite account. You can post, comment and vote right now —
-          your activity goes out through the SkateHive community account. Get sponsored to
-          claim your own @{currentUsername} on Hive.
+        <Text
+          style={[
+            styles.errorText,
+            {
+              marginTop: 10,
+              textAlign: "center",
+              paddingHorizontal: 32,
+              color: theme.colors.muted,
+              lineHeight: 20,
+            },
+          ]}
+        >
+          Lite account — your posts go out via @skatehive. Get sponsored to
+          claim @{currentUsername} on Hive.
         </Text>
-        <Pressable onPress={logout} style={{ marginTop: 28 }}>
+        <Pressable onPress={logout} style={{ marginTop: 24 }}>
           <Text style={{ color: theme.colors.primary, fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.md }}>
             Log out
           </Text>

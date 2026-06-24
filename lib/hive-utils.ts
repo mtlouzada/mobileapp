@@ -427,13 +427,10 @@ export async function getLastSnapsContainer(): Promise<{ author: string; permlin
  * @returns Profile information with stats
  */
 export async function getProfile(username: string): Promise<any> {
-  try {
-    const profile = await HiveClient.call('bridge', 'get_profile', { account: username });
-    return profile;
-  } catch (error) {
-    console.error('Error fetching profile:', error);
-    throw error;
-  }
+  // A missing account is an expected state (e.g. lite accounts whose handle is
+  // not yet on-chain), so don't log here — callers decide how to handle the throw.
+  const profile = await HiveClient.call('bridge', 'get_profile', { account: username });
+  return profile;
 }
 
 /**
