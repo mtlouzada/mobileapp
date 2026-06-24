@@ -130,7 +130,11 @@ export default function CreatePost() {
         }
       }
 
-      // Publish in the background (Reels can take 30s+); toast on completion.
+      // Best-effort, fire-and-forget. The snap already posted successfully, so
+      // we only celebrate a CONFIRMED Instagram publish and stay quiet
+      // otherwise: a Reel can take longer than this request waits (it may still
+      // publish server-side after we'd have timed out), so a failure/timeout
+      // here is NOT a reliable signal and must never show the user a red error.
       crossPostToInstagram(session, {
         permlink: args.permlink,
         body: args.body,
@@ -140,9 +144,12 @@ export default function CreatePost() {
         permalinkUrl: `${WEB_BASE_URL}/post/${args.author}/${args.permlink}`,
       })
         .then(() => showToast("Shared to Instagram", "success"))
-        .catch((e) =>
-          showToast(e instanceof Error ? e.message : "Instagram cross-post failed", "error")
-        );
+        .catch((e) => {
+          console.warn(
+            "[instagram] cross-post unconfirmed:",
+            e instanceof Error ? e.message : e
+          );
+        });
     } catch {
       // Never block the post flow on cross-post setup.
     }
