@@ -91,8 +91,17 @@ export function RecentMediaGallery({
   }, [requestPermission, loadRecentMedia]);
 
   const handleMediaPress = useCallback(
-    (asset: MediaAsset) => {
-      onMediaSelect(asset);
+    async (asset: MediaAsset) => {
+      // MediaLibrary asset.uri is a Photos reference (ph:// / ph-upload:// on
+      // iOS) which RN's networking can't upload. Resolve it to a real local
+      // file:// path (downloading from iCloud if needed) before handing it off.
+      try {
+        const info = await MediaLibrary.getAssetInfoAsync(asset.id);
+        onMediaSelect({ ...asset, uri: info.localUri || asset.uri });
+      } catch (error) {
+        console.error("Error resolving media asset localUri:", error);
+        onMediaSelect(asset);
+      }
     },
     [onMediaSelect]
   );
