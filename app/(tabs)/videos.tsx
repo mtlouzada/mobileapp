@@ -262,7 +262,7 @@ export default function VideosScreen() {
       setVoteCountStates((p) => ({ ...p, [key]: wasLiked ? prevCount - 1 : prevCount + 1 }));
 
       await castVote(session!, video.author, video.permlink, wasLiked ? 0 : 10000);
-      showToast(wasLiked ? "Vote removed" : "Voted!", "success");
+      // No success toast — the $-confetti + heart fill are enough feedback.
     } catch (error) {
       setLikedStates((p) => ({ ...p, [key]: wasLiked }));
       setVoteCountStates((p) => ({ ...p, [key]: prevCount }));
