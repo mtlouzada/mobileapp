@@ -104,7 +104,9 @@ export default function TabLayout() {
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
-  const handleMenuChoice = (target: "/(tabs)/create" | "/spot-create") => {
+  const handleMenuChoice = (
+    target: "/(tabs)/create" | "/spot-create" | "/skate-dice",
+  ) => {
     setCreateMenuVisible(false);
     router.push(target);
   };
@@ -246,6 +248,14 @@ export default function TabLayout() {
               subtitle: "Add a skate spot to the map",
               variant: "secondary",
               onPress: () => handleMenuChoice("/spot-create"),
+            },
+            {
+              key: "play",
+              icon: "game-controller-outline",
+              title: "Play",
+              subtitle: "Coach Fred — skate or dice",
+              variant: "secondary",
+              onPress: () => handleMenuChoice("/skate-dice"),
             },
           ]}
         />

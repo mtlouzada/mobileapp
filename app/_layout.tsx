@@ -160,6 +160,12 @@ export default function RootLayout() {
                           }}
                         />
                         <Stack.Screen
+                          name="skate-dice/index"
+                          options={{
+                            contentStyle: { backgroundColor: '#070709' },
+                          }}
+                        />
+                        <Stack.Screen
                           name="email-login"
                           options={{
                             presentation: 'modal',
