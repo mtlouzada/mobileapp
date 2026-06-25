@@ -162,6 +162,9 @@ function VideoItem({
         >
           <Image source={{ uri: avatarUrl }} style={styles.avatar} transition={0} />
           <Text style={styles.username}>@{displayName}</Text>
+          {formatPayout(item.payout) ? (
+            <Text style={styles.balance}> +{formatPayout(item.payout)}</Text>
+          ) : null}
         </Pressable>
       </View>
 
@@ -199,13 +202,6 @@ function VideoItem({
         <Pressable style={styles.actionButton} onPress={() => onShare(item)}>
           <Ionicons name="share-outline" size={26} color="#fff" />
         </Pressable>
-
-        {formatPayout(item.payout) ? (
-          <View style={styles.payoutContainer}>
-            <Ionicons name="cash-outline" size={20} color={theme.colors.primary} />
-            <Text style={styles.payoutTextLarge}>{formatPayout(item.payout)}</Text>
-          </View>
-        ) : null}
       </View>
     </View>
   );
@@ -438,6 +434,15 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
   },
+  // Post earnings, inline with the @username: same size/weight, just green + "+".
+  balance: {
+    color: theme.colors.primary,
+    fontSize: 15,
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
   bottomOverlay: { position: "absolute", bottom: 120, left: 16, right: 80, zIndex: 10 },
   titleText: {
     color: "#fff",
@@ -472,16 +477,6 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
-  },
-  payoutContainer: { alignItems: "center", justifyContent: "center", marginTop: 4 },
-  payoutTextLarge: {
-    color: theme.colors.primary,
-    fontSize: 18,
-    fontWeight: "800",
-    marginTop: 4,
-    textShadowColor: "rgba(0,0,0,0.9)",
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 4,
   },
   emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center", gap: 16 },
   emptyText: { color: theme.colors.gray, fontSize: 16 },
