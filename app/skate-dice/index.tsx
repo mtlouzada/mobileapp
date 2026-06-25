@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   bottom: { flex: 1, position: 'relative', overflow: 'hidden' },
   characterWrap: {
     position: 'absolute',
-    bottom: 0, // natural size, simply anchored to the bottom edge (no scaling)
+    bottom: -64, // translate down so his arm meets the screen's bottom edge
     left: 0,
     right: 0,
     width: '100%',
