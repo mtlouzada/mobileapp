@@ -60,6 +60,7 @@ export default function Index() {
   const {
     isAuthenticated,
     isLoading,
+    username: authUsername,
     storedUsers,
     login,
     loginStoredUser,
@@ -68,6 +69,11 @@ export default function Index() {
   } = useAuth();
   const queryClient = useQueryClient();
   const isFocused = useIsFocused();
+
+  // Spectators are technically "authenticated" but can't post and must still be
+  // able to reach this login form (e.g. tapping "Log in to add a spot" on the
+  // map). Treat only real accounts as logged-in for the welcome/login screen.
+  const isRealUser = isAuthenticated && authUsername !== "SPECTATOR";
 
   const [deletingUser, setDeletingUser] = React.useState<string | null>(null);
   const [username, setUsername] = React.useState("");
@@ -85,17 +91,20 @@ export default function Index() {
     // Only auto-advance to the feed when the welcome screen itself is focused.
     // Otherwise a deep link (e.g. the map widget entering read-only spectator
     // mode) would flip `isAuthenticated` and yank the user off the map.
-    if (isAuthenticated && isFocused) {
+    // Spectators count as "authenticated" but have no posting ability, so they
+    // must still be able to reach this login form (e.g. via "Log in to add a
+    // spot") instead of being bounced straight to the feed.
+    if (isRealUser && isFocused) {
       router.push("/(tabs)/videos");
     }
-  }, [isAuthenticated, isFocused]);
+  }, [isRealUser, isFocused]);
 
   React.useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !isRealUser) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setIsFormVisible(true);
     }
-  }, [isLoading, isAuthenticated]);
+  }, [isLoading, isRealUser]);
 
   const handleInfoPress = () => {
     router.push("/about");
@@ -168,7 +177,7 @@ export default function Index() {
     }
   };
 
-  if (isLoading || isAuthenticated) {
+  if (isLoading || isRealUser) {
     return (
       <View style={styles.container}>
         <BackgroundVideo />
