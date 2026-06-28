@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import React, { createContext, useContext, useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { STORED_USERS_KEY, INACTIVITY_TIMEOUT_MS } from './constants';
+import { STORED_USERS_KEY } from './constants';
 import {
   AccountNotFoundError,
   InvalidKeyError,
@@ -34,6 +34,11 @@ import {
   saveUserbaseSession,
   clearUserbaseSession,
 } from './userbase/session-store';
+import {
+  saveActiveSession,
+  loadActiveSession,
+  clearActiveSession,
+} from './active-session';
 
 // ============================================================================
 // APPLE REVIEW TEST ACCOUNT CONFIGURATION
@@ -111,6 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setStoredUsers(updatedUsers);
       
       if (username === usernameToRemove) {
+        await clearActiveSession();
         setSession(null);
         setUsername(null);
         setIsAuthenticated(false);
@@ -149,13 +155,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [username]);
 
   const resetInactivityTimer = () => {
-    // Only reset timer if user is authenticated and has a session
-    if (!session || !isAuthenticated) return;
-    
+    // Inactivity auto-logout is disabled: sessions now persist for 30 days
+    // (see active-session.ts / checkCurrentUser). Kept as a no-op so existing
+    // callers (useActivityDetector) don't need to change. The previous 60-min
+    // idle timeout was logging users out — and also wiping the persisted
+    // userbase token — which is exactly what we no longer want.
     clearInactivityTimer();
-    inactivityTimer.current = setTimeout(() => {
-      handleInactivityLogout();
-    }, INACTIVITY_TIMEOUT_MS);
   };
 
   const clearInactivityTimer = () => {
@@ -163,10 +168,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(inactivityTimer.current);
       inactivityTimer.current = null;
     }
-  };
-
-  const handleInactivityLogout = async () => {
-    await logout();
   };
 
   // Load user relationship lists (following, muted, blacklisted)
@@ -242,8 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const checkCurrentUser = async () => {
     try {
       // Userbase (email) sessions are token-based / server-custody, so it's
-      // safe to auto-restore them on launch (no local key to decrypt). Hive-key
-      // accounts still require an explicit PIN/biometric login each time.
+      // safe to auto-restore them on launch (no local key to decrypt).
       const ub = await loadUserbaseSession();
       if (ub?.token && ub.user) {
         setUsername(ub.user.handle);
@@ -257,7 +257,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         return;
       }
-      // Do not auto-login Hive accounts: always require full login for the key.
+      // Hive-key accounts: restore the cached active session ("stay logged in"
+      // for 30 days) so the user isn't forced to re-enter their PIN on every
+      // launch — including cold starts from the Home Screen widget. Expired or
+      // missing sessions fall through to the logged-out state and re-login.
+      const active = await loadActiveSession();
+      if (active) {
+        setUsername(active.username);
+        setIsAuthenticated(true);
+        setSession({
+          username: active.username,
+          decryptedKey: active.decryptedKey,
+          loginTime: active.loginTime,
+          kind: 'hive',
+        });
+        return;
+      }
       setUsername(null);
       setIsAuthenticated(false);
       setSession(null);
@@ -370,10 +385,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         createdAt: Date.now(),
       };
       await updateStoredUsers(user);
+      const loginTime = Date.now();
       setUsername(normalizedUsername);
       setIsAuthenticated(true);
-      setSession({ username: normalizedUsername, decryptedKey: postingKey, loginTime: Date.now() });
-      
+      setSession({ username: normalizedUsername, decryptedKey: postingKey, loginTime, kind: 'hive' });
+      // Cache the active session so the user stays logged in for 30 days.
+      await saveActiveSession({ username: normalizedUsername, decryptedKey: postingKey, loginTime });
+
       // User relationships are loaded by the useEffect that watches username
     } catch (error) {
       if (
@@ -428,11 +446,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await deleteEncryptedKey(selectedUsername);
         throw new AuthError('Stored credentials are incompatible. Please log in again.');
       }
+      const loginTime = Date.now();
       setUsername(selectedUsername);
       setIsAuthenticated(true);
-      setSession({ username: selectedUsername, decryptedKey, loginTime: Date.now() });
+      setSession({ username: selectedUsername, decryptedKey, loginTime, kind: 'hive' });
       await updateStoredUsers({ username: selectedUsername, method: encryptedKey.method, createdAt: encryptedKey.createdAt });
-      
+      // Cache the active session so the user stays logged in for 30 days.
+      await saveActiveSession({ username: selectedUsername, decryptedKey, loginTime });
+
       // User relationships are loaded by the useEffect that watches username
     } catch (error) {
       if (
@@ -458,6 +479,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         userbaseLogout(session.userbaseToken).catch(() => {});
       }
       await clearUserbaseSession();
+      await clearActiveSession();
       setSession(null);
       setIsAuthenticated(false);
       setUsername(null);
@@ -492,6 +514,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       await SecureStore.deleteItemAsync(STORED_USERS_KEY);
       await SecureStore.deleteItemAsync('lastLoggedInUser');
+      await clearActiveSession();
       setStoredUsers([]);
       setSession(null);
       setUsername(null);

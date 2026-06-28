@@ -24,7 +24,7 @@ import { uploadImageToHive, uploadImageViaUserbase, createImageMarkdown } from "
 import { canPost, isUserbaseSession } from "~/lib/posting";
 import { uploadVideoToWorker, createVideoIframe } from "~/lib/upload/video-upload";
 import { submitSpot } from "~/lib/spotmap/createSpot";
-import { syncOneSpot } from "~/lib/spotmap/api";
+import { syncOneSpot, fetchAllSpots } from "~/lib/spotmap/api";
 import { syncSpotWidget } from "~/lib/widgets/spotWidget";
 import { persistUserLoc } from "~/lib/hooks/useSpotWidgetSync";
 import type { SpotmapRow } from "~/lib/spotmap/types";
@@ -59,6 +59,15 @@ export default function SpotCreateScreen() {
   // ?camera=1 (from the Home Screen "Add Spot" widget) auto-opens the camera.
   const params = useLocalSearchParams<{ camera?: string }>();
   const cameraAutoOpenedRef = useRef(false);
+
+  // Gate at entry: logged-out users (e.g. opening from the Home Screen widget)
+  // are sent to login BEFORE filling anything in, so no work is ever lost to a
+  // mid-flow auth prompt.
+  useEffect(() => {
+    if (!canPost(session)) {
+      router.replace("/login");
+    }
+  }, [session]);
 
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [name, setName] = useState("");
@@ -177,6 +186,7 @@ export default function SpotCreateScreen() {
   const removeMedia = (uri: string) => setMedia((prev) => prev.filter((m) => m.uri !== uri));
 
   const canSubmit = !submitting && name.trim().length > 0 && !!coords;
+  const atMediaLimit = media.length >= 6;
 
   const handleSubmit = async () => {
     if (!username || !canPost(session)) {
@@ -245,14 +255,27 @@ export default function SpotCreateScreen() {
         hive_permlink: permlink,
         hive_created: new Date().toISOString(),
       };
+      // Make sure the full list is loaded before prepending the optimistic pin.
+      // When the user arrives straight from the Home Screen widget, the map
+      // query may never have run — seeding the cache with only the new pin would
+      // hide every other spot until the 5-min cache expires (the "only my spot
+      // shows" bug). Fetch the canonical list first (best-effort).
+      let base = queryClient.getQueryData<SpotmapRow[]>(["spotmap", "all"]);
+      if (!base || base.length === 0) {
+        base = await queryClient
+          .fetchQuery({
+            queryKey: ["spotmap", "all"],
+            queryFn: ({ signal }) => fetchAllSpots(signal),
+          })
+          .catch(() => base ?? []);
+      }
       // Dedup on (hive_author, hive_permlink) — the canonical row arrives with a
       // Supabase uuid `id`, not our fabricated `author/permlink`, so filtering by
       // `id` would never remove this optimistic copy and the pin would double up.
-      queryClient.setQueryData<SpotmapRow[]>(["spotmap", "all"], (old) =>
-        old
-          ? [optimistic, ...old.filter((s) => !(s.hive_author === author && s.hive_permlink === permlink))]
-          : [optimistic]
+      const deduped = (base ?? []).filter(
+        (s) => !(s.hive_author === author && s.hive_permlink === permlink),
       );
+      queryClient.setQueryData<SpotmapRow[]>(["spotmap", "all"], [optimistic, ...deduped]);
 
       // Targeted server ingestion so it appears for everyone within seconds,
       // then refetch the canonical list. Best-effort — the optimistic pin and
@@ -295,32 +318,50 @@ export default function SpotCreateScreen() {
         <View style={styles.headerBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        {/* Media */}
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Media — up to 6 photos/videos */}
+        <Text style={styles.label}>
+          Photos & videos{"  "}
+          <Text style={styles.labelCount}>{media.length}/6</Text>
+        </Text>
         <View style={styles.mediaRow}>
           <Pressable
-            style={[styles.mediaBtn, submitting && styles.controlDisabled]}
+            style={[styles.mediaBtn, (submitting || atMediaLimit) && styles.controlDisabled]}
             onPress={addFromCamera}
-            disabled={submitting}
+            disabled={submitting || atMediaLimit}
           >
             <Ionicons name="camera-outline" size={22} color={theme.colors.primary} />
             <Text style={styles.mediaBtnText}>Camera</Text>
           </Pressable>
           <Pressable
-            style={[styles.mediaBtn, submitting && styles.controlDisabled]}
+            style={[styles.mediaBtn, (submitting || atMediaLimit) && styles.controlDisabled]}
             onPress={addFromLibrary}
-            disabled={submitting}
+            disabled={submitting || atMediaLimit}
           >
             <Ionicons name="images-outline" size={22} color={theme.colors.primary} />
-            <Text style={styles.mediaBtnText}>Library</Text>
+            <Text style={styles.mediaBtnText}>Add photos</Text>
           </Pressable>
         </View>
+        {atMediaLimit && (
+          <Text style={styles.hint}>Maximum of 6 reached — remove one to add another.</Text>
+        )}
 
         {media.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbStrip}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.thumbStrip}
+            contentContainerStyle={styles.thumbStripContent}
+          >
             {media.map((m) => (
               <View key={m.uri} style={styles.thumbWrap}>
-                <Image source={{ uri: m.uri }} style={styles.thumb} />
+                <Image source={{ uri: m.uri }} style={styles.thumb} resizeMode="contain" />
                 {m.type === "video" && (
                   <View style={styles.videoBadge}>
                     <Ionicons name="play" size={12} color="#fff" />
@@ -330,8 +371,9 @@ export default function SpotCreateScreen() {
                   style={styles.thumbRemove}
                   onPress={() => removeMedia(m.uri)}
                   disabled={submitting}
+                  hitSlop={8}
                 >
-                  <Ionicons name="close-circle" size={20} color={theme.colors.danger} />
+                  <Ionicons name="close-circle" size={22} color={theme.colors.danger} />
                 </Pressable>
               </View>
             ))}
@@ -452,19 +494,36 @@ const styles = StyleSheet.create({
   },
   mediaBtnText: { color: theme.colors.text, fontFamily: theme.fonts.bold, fontSize: theme.fontSizes.md },
   controlDisabled: { opacity: 0.4 },
-  thumbStrip: { flexGrow: 0 },
+  thumbStrip: { flexGrow: 0, marginTop: theme.spacing.sm },
+  // Padding gives the negative-offset remove buttons room so the horizontal
+  // ScrollView doesn't clip them.
+  thumbStripContent: { paddingTop: 10, paddingRight: 10, paddingLeft: 2 },
   thumbWrap: { marginRight: theme.spacing.sm },
-  thumb: { width: 84, height: 84, borderRadius: theme.borderRadius.sm, backgroundColor: theme.colors.secondaryCard },
+  // contain (not cover) so the whole photo/video frame is visible — no harsh
+  // square crop — letterboxed on the dark tile.
+  thumb: {
+    width: 96,
+    height: 96,
+    borderRadius: theme.borderRadius.sm,
+    backgroundColor: "#000",
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
   videoBadge: {
     position: "absolute", bottom: 4, left: 4,
     backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 8, padding: 2,
   },
-  thumbRemove: { position: "absolute", top: -6, right: -6, backgroundColor: theme.colors.background, borderRadius: 10 },
+  thumbRemove: { position: "absolute", top: -8, right: -8, backgroundColor: theme.colors.background, borderRadius: 11 },
   label: {
     color: theme.colors.muted,
     fontFamily: theme.fonts.bold,
     fontSize: theme.fontSizes.sm,
     marginTop: theme.spacing.sm,
+  },
+  labelCount: {
+    color: theme.colors.primary,
+    fontFamily: theme.fonts.bold,
+    fontSize: theme.fontSizes.sm,
   },
   mapWrap: {
     height: 200,

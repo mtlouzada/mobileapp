@@ -22,6 +22,8 @@ import { Text } from "../ui/text";
 import { VotingSlider } from "../ui/VotingSlider";
 import { MediaPreview } from "./MediaPreview";
 import { EnhancedMarkdownRenderer } from "../markdown/EnhancedMarkdownRenderer";
+import { SpotLocationLine } from "../spotmap/SpotLocationLine";
+import { parseSpotBody } from "~/lib/spotmap/parseSpotBody";
 // Lazy import breaks the require cycle:
 // PostCard → FullConversationDrawer → PostCard
 const FullConversationDrawer = React.lazy(() =>
@@ -131,6 +133,10 @@ export const PostCard = React.memo(
     // Memoize media extraction
     const media = useMemo(() => extractMediaFromBody(post.body), [post.body]);
 
+    // Spot posts get a rich, tappable location header instead of the raw
+    // "Spot Name:" / "🌐 lat, lng (address)" text lines.
+    const spot = useMemo(() => parseSpotBody(post.body), [post.body]);
+
     // Extract thumbnail for video posts from json_metadata
     const videoThumbnailUrl = useMemo(() => {
       if (!media.some((m) => m.type === "video")) return null;
@@ -147,7 +153,9 @@ export const PostCard = React.memo(
 
     // Memoize post content processing - remove iframes, images, and video links
     const postContent = useMemo(() => {
-      let content = post.body;
+      // For spot posts, drop the parsed header lines (name + coords) — they're
+      // rendered by SpotLocationLine — and keep only the description + media.
+      let content = spot ? spot.rest : post.body;
       // Remove iframes (multiline) and images
       content = content.replace(
         /<iframe[\s\S]*?<\/iframe>|!\[.*?\]\(.*?\)/gi,
@@ -156,7 +164,7 @@ export const PostCard = React.memo(
       // Remove plain video URLs (YouTube and Odysee)
       content = removeVideoLinksFromBody(content);
       return content.trim();
-    }, [post.body]);
+    }, [post.body, spot]);
 
     // Memoize formatted date
     const formattedDate = useMemo(() => {
@@ -412,6 +420,16 @@ export const PostCard = React.memo(
                   </Pressable>
                 )}
               </View>
+
+              {/* Spot location — rich, tappable Google Maps link */}
+              {spot && (
+                <SpotLocationLine
+                  name={spot.name}
+                  lat={spot.lat}
+                  lng={spot.lng}
+                  address={spot.address}
+                />
+              )}
 
               {/* Content */}
               <Pressable onPress={handleBodyPress}>

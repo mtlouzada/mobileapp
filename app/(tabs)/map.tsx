@@ -20,6 +20,8 @@ import { useFocusEffect } from "@react-navigation/native";
 import { Text } from "~/components/ui/text";
 import { theme } from "~/lib/theme";
 import { useToast } from "~/lib/toast-provider";
+import { useAuth } from "~/lib/auth-provider";
+import { canPost } from "~/lib/posting";
 import { useAllSpots } from "~/lib/hooks/useSpotmap";
 import { MapSpotCard } from "~/components/spotmap/MapSpotCard";
 import { SpotMarker, ClusterMarker } from "~/components/spotmap/SpotMarker";
@@ -59,6 +61,15 @@ export default function MapScreen() {
     dataUpdatedAt,
   } = useAllSpots();
   const { showToast } = useToast();
+  const { session } = useAuth();
+  const loggedIn = canPost(session);
+
+  // Add-spot CTA. Logged-out users can browse the map freely, but the button
+  // turns into a login prompt so they understand what's needed to contribute.
+  const handleAddSpot = React.useCallback(() => {
+    Haptics.selectionAsync();
+    router.push(loggedIn ? "/spot-create" : "/login");
+  }, [loggedIn]);
 
   // Refetch when returning to the map tab, but only if the cached set is
   // stale (>5 min) — keeps it fresh without spamming the edge cache.
@@ -322,6 +333,23 @@ export default function MapScreen() {
         })}
       </MapView>
 
+      {/* Add Spot — becomes a login prompt when signed out */}
+      <Pressable
+        style={[styles.addSpotPill, !loggedIn && styles.addSpotPillMuted]}
+        onPress={handleAddSpot}
+        accessibilityRole="button"
+        accessibilityLabel={loggedIn ? "Add a skate spot" : "Log in to add a spot"}
+      >
+        <Ionicons
+          name={loggedIn ? "add" : "log-in-outline"}
+          size={18}
+          color={loggedIn ? theme.colors.black : theme.colors.primary}
+        />
+        <Text style={[styles.addSpotText, !loggedIn && styles.addSpotTextMuted]}>
+          {loggedIn ? "Add Spot" : "Log in to add a spot"}
+        </Text>
+      </Pressable>
+
       {/* Near Me */}
       <Pressable
         style={styles.fab}
@@ -395,6 +423,41 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
+  },
+  addSpotPill: {
+    position: "absolute",
+    top: theme.spacing.md,
+    left: theme.spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 48,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: 24,
+    backgroundColor: theme.colors.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.4,
+        shadowRadius: 4,
+      },
+      android: { elevation: 6 },
+    }),
+  },
+  addSpotPillMuted: {
+    backgroundColor: "rgba(0,0,0,0.85)",
+    borderColor: theme.colors.primary,
+  },
+  addSpotText: {
+    color: theme.colors.black,
+    fontFamily: theme.fonts.bold,
+    fontSize: theme.fontSizes.sm,
+  },
+  addSpotTextMuted: {
+    color: theme.colors.primary,
   },
   fab: {
     position: "absolute",
